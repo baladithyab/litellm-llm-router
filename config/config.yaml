@@ -1,0 +1,126 @@
+# LiteLLM + LLMRouter Configuration
+# =============================================================================
+# This is the main configuration file for the LiteLLM gateway with LLMRouter
+# intelligent routing strategies.
+
+# =============================================================================
+# Model List - Define your LLM providers and models
+# =============================================================================
+model_list:
+  # OpenAI Models
+  - model_name: gpt-4
+    litellm_params:
+      model: openai/gpt-4
+      api_key: os.environ/OPENAI_API_KEY
+
+  - model_name: gpt-4-turbo
+    litellm_params:
+      model: openai/gpt-4-turbo
+      api_key: os.environ/OPENAI_API_KEY
+
+  - model_name: gpt-3.5-turbo
+    litellm_params:
+      model: openai/gpt-3.5-turbo
+      api_key: os.environ/OPENAI_API_KEY
+
+  # Anthropic Models
+  - model_name: claude-3-opus
+    litellm_params:
+      model: anthropic/claude-3-opus-20240229
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+  - model_name: claude-3-sonnet
+    litellm_params:
+      model: anthropic/claude-3-sonnet-20240229
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+  - model_name: claude-3-haiku
+    litellm_params:
+      model: anthropic/claude-3-haiku-20240307
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+# =============================================================================
+# Router Settings - LLMRouter Integration
+# =============================================================================
+router_settings:
+  # Routing strategy options:
+  # LiteLLM built-in: simple-shuffle, least-busy, latency-based-routing, 
+  #                   cost-based-routing, usage-based-routing
+  # LLMRouter ML-based: llmrouter-knn, llmrouter-svm, llmrouter-mlp,
+  #                     llmrouter-mf, llmrouter-elo, llmrouter-hybrid,
+  #                     llmrouter-custom
+  routing_strategy: simple-shuffle
+  
+  # LLMRouter strategy arguments (used when routing_strategy starts with 'llmrouter-')
+  routing_strategy_args:
+    # Path to trained model file
+    model_path: /app/models/router_model.pt
+    # Path to LLM candidates JSON
+    llm_data_path: /app/config/llm_candidates.json
+    # Enable hot-reloading of model
+    hot_reload: true
+    # How often to check for model updates (seconds)
+    reload_interval: 300
+    # S3 settings for remote model loading (optional)
+    # model_s3_bucket: my-bucket
+    # model_s3_key: models/router_model.pt
+
+  # Retry/fallback settings
+  num_retries: 2
+  retry_after: 5
+  timeout: 600
+  
+  # Enable routing caching
+  cache_responses: true
+
+# =============================================================================
+# General Settings
+# =============================================================================
+general_settings:
+  # Master key for admin access
+  master_key: os.environ/LITELLM_MASTER_KEY
+  
+  # Database for persistence (optional)
+  database_url: os.environ/DATABASE_URL
+  
+  # Disable storing prompts in DB for privacy
+  store_model_in_db: true
+
+# =============================================================================
+# LiteLLM Settings
+# =============================================================================
+litellm_settings:
+  # Enable response caching
+  cache: true
+  cache_params:
+    type: redis
+    host: os.environ/REDIS_HOST
+    port: os.environ/REDIS_PORT
+    ttl: 3600
+  
+  # Logging
+  set_verbose: false
+  
+  # Cost tracking
+  success_callback: ["langfuse"]
+  failure_callback: ["langfuse"]
+  
+  # Rate limiting (optional)
+  # max_budget: 100
+  # budget_duration: 30d
+
+# =============================================================================
+# Environment Variables Reference
+# =============================================================================
+# Required:
+#   - LITELLM_MASTER_KEY: Master API key for admin access
+#   - OPENAI_API_KEY: OpenAI API key
+#   - ANTHROPIC_API_KEY: Anthropic API key
+#
+# Optional:
+#   - DATABASE_URL: PostgreSQL connection string
+#   - REDIS_HOST: Redis host for caching
+#   - REDIS_PORT: Redis port (default: 6379)
+#   - AZURE_API_KEY: Azure OpenAI API key
+#   - AZURE_API_BASE: Azure OpenAI endpoint
+
