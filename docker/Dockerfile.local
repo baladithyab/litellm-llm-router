@@ -1,0 +1,74 @@
+# syntax=docker/dockerfile:1.4
+# LiteLLM + LLMRouter Local Development Dockerfile
+# Uses local reference/ folder for development iteration
+
+ARG PYTHON_VERSION=3.11
+ARG LITELLM_VERSION=1.72.6
+
+FROM python:${PYTHON_VERSION}-slim-bookworm
+
+LABEL org.opencontainers.image.description="LiteLLM + LLMRouter: Local Development Build"
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    gcc \
+    g++ \
+    git \
+    curl \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Upgrade pip
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel
+
+# Install LiteLLM with proxy extras
+ARG LITELLM_VERSION
+RUN pip install --no-cache-dir "litellm[proxy]==${LITELLM_VERSION}"
+
+# Install OpenTelemetry for tracing
+RUN pip install --no-cache-dir \
+    opentelemetry-api \
+    opentelemetry-sdk \
+    opentelemetry-exporter-otlp \
+    opentelemetry-instrumentation-fastapi \
+    opentelemetry-instrumentation-httpx \
+    opentelemetry-instrumentation-logging
+
+# Install additional dependencies
+COPY requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt || true
+
+# Copy and install LLMRouter from local reference
+COPY reference/LLMRouter /tmp/LLMRouter
+RUN cd /tmp/LLMRouter && pip install --no-cache-dir . || echo "LLMRouter install skipped"
+
+# Copy custom routing integration
+COPY src/litellm_llmrouter /app/litellm_llmrouter
+
+# Copy entrypoint and config
+COPY docker/entrypoint.local.sh /app/entrypoint.sh
+COPY config/ /app/config/
+
+# Create directories
+RUN mkdir -p /app/models /app/data /app/custom_routers && \
+    chmod +x /app/entrypoint.sh
+
+# Environment variables
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    LITELLM_CONFIG_PATH=/app/config/config.yaml \
+    LLMROUTER_MODELS_PATH=/app/models \
+    PYTHONPATH=/app
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
+    CMD curl -f http://localhost:4000/health/liveliness || exit 1
+
+EXPOSE 4000
+
+ENTRYPOINT ["/app/entrypoint.sh"]
+CMD ["--config", "/app/config/config.yaml", "--port", "4000"]
+
