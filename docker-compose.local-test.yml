@@ -1,0 +1,98 @@
+# LiteLLM + LLMRouter - Local Testing Setup
+# Tests: A2A Gateway, MCP Gateway, Routing Strategies, Hot Reload, Config Sync
+
+services:
+  # ==========================================================================
+  # PostgreSQL - For persistent storage
+  # ==========================================================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: litellm-test-postgres
+    environment:
+      POSTGRES_USER: litellm
+      POSTGRES_PASSWORD: testpassword
+      POSTGRES_DB: litellm
+    volumes:
+      - test_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U litellm"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - litellm-test-network
+
+  # ==========================================================================
+  # Redis - For caching and distributed state
+  # ==========================================================================
+  redis:
+    image: redis:7-alpine
+    container_name: litellm-test-redis
+    command: redis-server --appendonly yes
+    volumes:
+      - test_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - litellm-test-network
+
+  # ==========================================================================
+  # LiteLLM + LLMRouter Gateway - Full Feature Test
+  # ==========================================================================
+  litellm-gateway:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.local
+    container_name: litellm-test-gateway
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "4000:4000"
+    volumes:
+      - ./config:/app/config:ro
+      - ./models:/app/models:ro
+      - ./custom_routers:/app/custom_routers:ro
+    environment:
+      # Core settings
+      - LITELLM_CONFIG_PATH=/app/config/config.local-test.yaml
+      - LITELLM_MASTER_KEY=sk-test-master-key
+      - DATABASE_URL=postgresql://litellm:testpassword@postgres:5432/litellm
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      # LLM Provider API Keys (use mock for testing)
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-sk-mock-openai-key}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-sk-mock-anthropic-key}
+      # Gateway Features - ALL ENABLED for testing
+      - A2A_GATEWAY_ENABLED=true
+      - MCP_GATEWAY_ENABLED=true
+      - STORE_MODEL_IN_DB=true
+      # LLMRouter Settings
+      - LLMROUTER_MODELS_PATH=/app/models
+      - LLMROUTER_HOT_RELOAD=true
+      - LLMROUTER_RELOAD_INTERVAL=30
+      # Config Sync & Hot Reload
+      - CONFIG_HOT_RELOAD=true
+      - CONFIG_SYNC_ENABLED=true
+      - CONFIG_SYNC_INTERVAL=30
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - litellm-test-network
+
+volumes:
+  test_postgres_data:
+  test_redis_data:
+
+networks:
+  litellm-test-network:
+    driver: bridge

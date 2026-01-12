@@ -140,6 +140,149 @@ Content-Type: application/json
 }
 ```
 
+## A2A Gateway Endpoints
+
+> Requires `A2A_GATEWAY_ENABLED=true`
+
+### Register A2A Agent
+
+```http
+POST /a2a/agents
+Authorization: Bearer sk-master-key
+Content-Type: application/json
+
+{
+  "agent_id": "my-agent",
+  "name": "My AI Agent",
+  "description": "Agent for customer support",
+  "url": "http://agent-service:8000/a2a",
+  "capabilities": ["chat", "support"]
+}
+```
+
+### List A2A Agents
+
+```http
+GET /a2a/agents
+Authorization: Bearer sk-master-key
+```
+
+### Discover Agents by Capability
+
+```http
+GET /a2a/agents?capability=chat
+Authorization: Bearer sk-master-key
+```
+
+### Get Agent Card
+
+```http
+GET /a2a/agents/{agent_id}/card
+```
+
+### Unregister Agent
+
+```http
+DELETE /a2a/agents/{agent_id}
+Authorization: Bearer sk-master-key
+```
+
+## MCP Gateway Endpoints
+
+> Requires `MCP_GATEWAY_ENABLED=true`
+
+### Register MCP Server
+
+```http
+POST /mcp/servers
+Authorization: Bearer sk-master-key
+Content-Type: application/json
+
+{
+  "server_id": "my-mcp-server",
+  "name": "My MCP Server",
+  "url": "http://mcp-service:8080/mcp",
+  "transport": "streamable_http",
+  "tools": ["search", "fetch"]
+}
+```
+
+### List MCP Servers
+
+```http
+GET /mcp/servers
+Authorization: Bearer sk-master-key
+```
+
+### List Available Tools
+
+```http
+GET /mcp/tools
+Authorization: Bearer sk-master-key
+```
+
+### List Available Resources
+
+```http
+GET /mcp/resources
+Authorization: Bearer sk-master-key
+```
+
+### Unregister MCP Server
+
+```http
+DELETE /mcp/servers/{server_id}
+Authorization: Bearer sk-master-key
+```
+
+## Config Sync Endpoints
+
+### Get Sync Status
+
+```http
+GET /config/sync/status
+Authorization: Bearer sk-master-key
+```
+
+**Response:**
+```json
+{
+  "enabled": true,
+  "hot_reload_enabled": true,
+  "sync_interval_seconds": 60,
+  "s3": {
+    "enabled": true,
+    "bucket": "my-config-bucket",
+    "key": "config.yaml",
+    "last_etag": "abc123..."
+  },
+  "reload_count": 3,
+  "last_sync_time": 1704067200.0,
+  "running": true
+}
+```
+
+### Reload Configuration
+
+```http
+POST /config/reload
+Authorization: Bearer sk-master-key
+Content-Type: application/json
+
+{
+  "force_sync": true
+}
+```
+
+**Response:**
+```json
+{
+  "status": "success",
+  "message": "Config reload triggered",
+  "synced_from_remote": true
+}
+```
+
 ## Error Responses
 
 ```json
@@ -175,3 +318,10 @@ curl -X POST http://localhost:4000/chat/completions \
     "stream": true
   }'
 ```
+
+## See Also
+
+- [A2A Gateway](a2a-gateway.md) - Agent-to-Agent protocol
+- [MCP Gateway](mcp-gateway.md) - Model Context Protocol
+- [Vector Stores](vector-stores.md) - Vector database integrations (coming soon)
+- [Hot Reloading](hot-reloading.md) - Dynamic configuration updates

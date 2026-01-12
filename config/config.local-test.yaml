@@ -1,0 +1,109 @@
+# LiteLLM + LLMRouter - Local Test Configuration
+# Tests all features: A2A, MCP, Routing Strategies, Hot Reload
+
+# =============================================================================
+# Model List - Test models with multiple routing options
+# =============================================================================
+model_list:
+  # OpenAI Models (uses mock key if not set)
+  - model_name: gpt-4
+    litellm_params:
+      model: openai/gpt-4
+      api_key: os.environ/OPENAI_API_KEY
+    model_info:
+      id: gpt-4
+      mode: chat
+
+  - model_name: gpt-3.5-turbo
+    litellm_params:
+      model: openai/gpt-3.5-turbo
+      api_key: os.environ/OPENAI_API_KEY
+    model_info:
+      id: gpt-3.5-turbo
+      mode: chat
+
+  # Anthropic Models
+  - model_name: claude-3-opus
+    litellm_params:
+      model: anthropic/claude-3-opus-20240229
+      api_key: os.environ/ANTHROPIC_API_KEY
+    model_info:
+      id: claude-3-opus
+      mode: chat
+
+  - model_name: claude-3-haiku
+    litellm_params:
+      model: anthropic/claude-3-haiku-20240307
+      api_key: os.environ/ANTHROPIC_API_KEY
+    model_info:
+      id: claude-3-haiku
+      mode: chat
+
+# =============================================================================
+# Router Settings - Test Multiple Strategies
+# =============================================================================
+router_settings:
+  # Default to simple-shuffle, can be changed via API
+  routing_strategy: simple-shuffle
+
+  # LLMRouter strategy arguments
+  routing_strategy_args:
+    model_path: /app/models/router_model.pt
+    llm_data_path: /app/config/llm_candidates.json
+    hot_reload: true
+    reload_interval: 30
+
+  num_retries: 2
+  retry_after: 5
+  timeout: 300
+  cache_responses: true
+
+# =============================================================================
+# General Settings
+# =============================================================================
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  database_url: os.environ/DATABASE_URL
+  store_model_in_db: true
+  # Enable detailed logging for testing
+  alerting: ["slack"]
+
+# =============================================================================
+# LiteLLM Settings
+# =============================================================================
+litellm_settings:
+  cache: true
+  cache_params:
+    type: redis
+    host: os.environ/REDIS_HOST
+    port: os.environ/REDIS_PORT
+    ttl: 300
+  set_verbose: true
+  drop_params: true
+
+# =============================================================================
+# MCP Servers - Test Configuration
+# =============================================================================
+# MCP servers are managed via API when MCP_GATEWAY_ENABLED=true
+# Example servers that can be added via API:
+# POST /mcp/servers with body:
+# {
+#   "server_id": "my-mcp-server",
+#   "name": "My MCP Server",
+#   "url": "http://localhost:8080/mcp",
+#   "transport": "streamable_http"
+# }
+
+# =============================================================================
+# A2A Agents - Test Configuration
+# =============================================================================
+# A2A agents are managed via API when A2A_GATEWAY_ENABLED=true
+# Example agents that can be added via API:
+# POST /a2a/agents with body:
+# {
+#   "agent_id": "my-agent",
+#   "name": "My Agent",
+#   "description": "A test agent",
+#   "url": "http://localhost:9000/a2a",
+#   "capabilities": ["chat", "code"]
+# }
