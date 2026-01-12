@@ -53,7 +53,7 @@ services:
       redis:
         condition: service_healthy
     ports:
-      - "4000:4000"
+      - "4010:4000"
     volumes:
       - ./config:/app/config:ro
       - ./models:/app/models:ro
@@ -62,7 +62,8 @@ services:
       # Core settings
       - LITELLM_CONFIG_PATH=/app/config/config.local-test.yaml
       - LITELLM_MASTER_KEY=sk-test-master-key
-      - DATABASE_URL=postgresql://litellm:testpassword@postgres:5432/litellm
+      # Disable database for local testing to avoid Prisma setup issues
+      # - DATABASE_URL=postgresql://litellm:testpassword@postgres:5432/litellm
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       # LLM Provider API Keys (use mock for testing)

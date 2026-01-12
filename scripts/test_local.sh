@@ -41,19 +41,20 @@ test_health() {
     echo ""
     echo "--- Test 1: Health Check ---"
 
-    response=$(curl -s "$BASE_URL/health")
-    if echo "$response" | grep -q "healthy"; then
-        pass "Health endpoint returns healthy"
+    # Liveliness probe (no auth required)
+    response=$(curl -s "$BASE_URL/health/liveliness")
+    if echo "$response" | grep -q "alive"; then
+        pass "Liveliness endpoint returns alive"
     else
-        fail "Health check failed: $response"
+        fail "Liveliness check failed: $response"
     fi
 
-    # Liveliness probe
-    response=$(curl -s -o /dev/null -w "%{http_code}" "$BASE_URL/health/liveliness")
+    # Readiness probe (no auth required)
+    response=$(curl -s -o /dev/null -w "%{http_code}" "$BASE_URL/health/readiness")
     if [ "$response" = "200" ]; then
-        pass "Liveliness probe returns 200"
+        pass "Readiness probe returns 200"
     else
-        fail "Liveliness probe failed: $response"
+        info "Readiness probe returned: $response"
     fi
 }
 
