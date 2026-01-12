@@ -10,12 +10,12 @@
 
 ## Overview
 
-This project integrates [LiteLLM](https://github.com/BerriAI/litellm) (a unified LLM API gateway) with [LLMRouter](https://github.com/ulab-uiuc/LLMRouter) (an intelligent routing library with 16+ ML-based routing strategies) into a single, production-ready Docker container.
+This project integrates [LiteLLM](https://github.com/BerriAI/litellm) (a unified LLM API gateway) with [LLMRouter](https://github.com/ulab-uiuc/LLMRouter) (an intelligent routing library with 18+ ML-based routing strategies including single-round, multi-round, personalized, and agentic routers) into a single, production-ready Docker container.
 
 ### Key Features
 
 - 🚀 **Unified LLM Gateway**: Access 100+ LLM providers through a single OpenAI-compatible API
-- 🧠 **ML-Powered Routing**: 16+ intelligent routing strategies (KNN, SVM, MLP, Matrix Factorization, etc.)
+- 🧠 **ML-Powered Routing**: 18+ intelligent routing strategies across 4 categories (single-round, multi-round, personalized, agentic)
 - 🔄 **Hot-Reloading**: Update routing strategies without container restarts
 - 📊 **High Availability**: Redis for distributed state, PostgreSQL for persistence, S3 for config sync
 - 🐳 **Multi-Architecture**: Supports both `linux/amd64` and `linux/arm64`
@@ -96,19 +96,30 @@ docker run -d \
 - `cost-based-routing` - Route to minimize cost
 - `usage-based-routing` - Route based on TPM/RPM usage
 
-### LLMRouter ML Strategies (12 available)
-- `llmrouter-knn` - K-Nearest Neighbors based routing
+### LLMRouter ML Strategies (18+ available)
+
+**Single-Round:**
+- `llmrouter-knn` - K-Nearest Neighbors routing
 - `llmrouter-svm` - Support Vector Machine routing
 - `llmrouter-mlp` - Multi-Layer Perceptron routing
 - `llmrouter-mf` - Matrix Factorization routing
 - `llmrouter-elo` - Elo Rating based routing
-- `llmrouter-hybrid` - Hybrid probabilistic routing
-- `llmrouter-graph` - Graph neural network routing
-- `llmrouter-automix` - Automatic model mixing
+- `llmrouter-routerdc` - Dual Contrastive learning (NeurIPS 2024)
+- `llmrouter-hybrid` - Hybrid probabilistic routing (ICLR 2024)
+- `llmrouter-graph` - Graph neural network routing (ICLR 2025)
+- `llmrouter-automix` - Automatic model mixing (NeurIPS 2024)
 - `llmrouter-causallm` - Causal LM router
-- `llmrouter-smallest` - Always route to smallest model (cost baseline)
-- `llmrouter-largest` - Always route to largest model (quality baseline)
-- `llmrouter-custom` - Your custom trained models
+
+**Multi-Round/Personalized/Agentic:**
+- `llmrouter-r1` - Router-R1 multi-turn (NeurIPS 2025)
+- `llmrouter-gmt` - Personalized user-preference router
+- `llmrouter-knn-multiround` - KNN agentic router
+- `llmrouter-llm-multiround` - LLM agentic router
+
+**Baselines:**
+- `llmrouter-smallest` - Always smallest (cost baseline)
+- `llmrouter-largest` - Always largest (quality baseline)
+- `llmrouter-custom` - Custom trained models
 
 ## Configuration Example
 

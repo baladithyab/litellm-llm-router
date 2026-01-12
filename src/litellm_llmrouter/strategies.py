@@ -16,6 +16,7 @@ from typing import Any, Dict, Optional
 from litellm._logging import verbose_proxy_logger
 
 # Available LLMRouter strategies (matching llmrouter.models exports)
+# See: https://github.com/ulab-uiuc/LLMRouter#-supported-routers
 LLMROUTER_STRATEGIES = [
     # Single-round routers
     "llmrouter-knn",  # KNNRouter - K-Nearest Neighbors
@@ -23,10 +24,18 @@ LLMROUTER_STRATEGIES = [
     "llmrouter-mlp",  # MLPRouter - Multi-Layer Perceptron
     "llmrouter-mf",  # MFRouter - Matrix Factorization
     "llmrouter-elo",  # EloRouter - Elo Rating based
+    "llmrouter-routerdc",  # RouterDC - Dual Contrastive learning
     "llmrouter-hybrid",  # HybridLLMRouter - Probabilistic hybrid
-    "llmrouter-causallm",  # CausalLMRouter - Transformer-based (optional)
-    "llmrouter-graph",  # GraphRouter - Graph neural network (optional)
+    "llmrouter-causallm",  # CausalLMRouter - Transformer-based
+    "llmrouter-graph",  # GraphRouter - Graph neural network
     "llmrouter-automix",  # AutomixRouter - Automatic model mixing
+    # Multi-round routers
+    "llmrouter-r1",  # RouterR1 - Pre-trained multi-turn router (requires vLLM)
+    # Personalized routers
+    "llmrouter-gmt",  # GMTRouter - Graph-based personalized router
+    # Agentic routers
+    "llmrouter-knn-multiround",  # KNNMultiRoundRouter - KNN agentic router
+    "llmrouter-llm-multiround",  # LLMMultiRoundRouter - LLM agentic router
     # Baseline routers
     "llmrouter-smallest",  # SmallestLLM - Always picks smallest
     "llmrouter-largest",  # LargestLLM - Always picks largest
@@ -113,65 +122,62 @@ class LLMRouterStrategyFamily:
         """Load the appropriate LLMRouter model based on strategy name."""
         strategy_type = self.strategy_name.replace("llmrouter-", "")
 
+        # Map strategy names to router classes
+        router_map = {
+            # Single-round routers
+            "knn": ("KNNRouter", False),
+            "svm": ("SVMRouter", False),
+            "mlp": ("MLPRouter", False),
+            "mf": ("MFRouter", False),
+            "elo": ("EloRouter", False),
+            "routerdc": ("RouterDC", False),
+            "hybrid": ("HybridLLMRouter", False),
+            "causallm": ("CausalLMRouter", True),  # optional
+            "graph": ("GraphRouter", True),  # optional
+            "automix": ("AutomixRouter", False),
+            # Multi-round routers
+            "r1": ("RouterR1", True),  # requires vLLM
+            # Personalized routers
+            "gmt": ("GMTRouter", False),
+            # Agentic routers
+            "knn-multiround": ("KNNMultiRoundRouter", False),
+            "llm-multiround": ("LLMMultiRoundRouter", False),
+            # Baseline routers
+            "smallest": ("SmallestLLM", False),
+            "largest": ("LargestLLM", False),
+        }
+
         try:
-            # Import from llmrouter.models (correct import path)
-            if strategy_type == "knn":
-                from llmrouter.models import KNNRouter
-
-                return KNNRouter(yaml_path=self.config_path)
-            elif strategy_type == "svm":
-                from llmrouter.models import SVMRouter
-
-                return SVMRouter(yaml_path=self.config_path)
-            elif strategy_type == "mlp":
-                from llmrouter.models import MLPRouter
-
-                return MLPRouter(yaml_path=self.config_path)
-            elif strategy_type == "mf":
-                from llmrouter.models import MFRouter
-
-                return MFRouter(yaml_path=self.config_path)
-            elif strategy_type == "elo":
-                from llmrouter.models import EloRouter
-
-                return EloRouter(yaml_path=self.config_path)
-            elif strategy_type == "causallm":
-                from llmrouter.models import CausalLMRouter
-
-                return (
-                    CausalLMRouter(yaml_path=self.config_path)
-                    if CausalLMRouter
-                    else None
-                )
-            elif strategy_type == "hybrid":
-                from llmrouter.models import HybridLLMRouter
-
-                return HybridLLMRouter(yaml_path=self.config_path)
-            elif strategy_type == "graph":
-                from llmrouter.models import GraphRouter
-
-                return GraphRouter(yaml_path=self.config_path) if GraphRouter else None
-            elif strategy_type == "automix":
-                from llmrouter.models import AutomixRouter
-
-                return AutomixRouter(yaml_path=self.config_path)
-            elif strategy_type == "smallest":
-                from llmrouter.models import SmallestLLM
-
-                return SmallestLLM(yaml_path=self.config_path)
-            elif strategy_type == "largest":
-                from llmrouter.models import LargestLLM
-
-                return LargestLLM(yaml_path=self.config_path)
-            elif strategy_type == "custom":
+            if strategy_type == "custom":
                 return self._load_custom_router()
-            else:
+
+            if strategy_type not in router_map:
                 verbose_proxy_logger.warning(
                     f"Unknown LLMRouter strategy: {strategy_type}, using MetaRouter"
                 )
                 from llmrouter.models import MetaRouter
 
                 return MetaRouter(yaml_path=self.config_path)
+
+            router_class_name, is_optional = router_map[strategy_type]
+
+            # Import from llmrouter.models
+            from llmrouter import models as llmrouter_models
+
+            router_class = getattr(llmrouter_models, router_class_name, None)
+
+            if router_class is None:
+                if is_optional:
+                    verbose_proxy_logger.warning(
+                        f"Optional router {router_class_name} not available. "
+                        "Install required dependencies."
+                    )
+                    return None
+                else:
+                    raise ImportError(f"Router class {router_class_name} not found")
+
+            return router_class(yaml_path=self.config_path)
+
         except ImportError as e:
             verbose_proxy_logger.error(f"Failed to import LLMRouter: {e}")
             return None

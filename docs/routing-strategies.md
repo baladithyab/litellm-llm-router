@@ -40,7 +40,7 @@ router_settings:
 
 ## LLMRouter ML-Based Strategies
 
-These strategies use machine learning models from [LLMRouter](https://github.com/ulab-uiuc/LLMRouter) to intelligently route queries. All 12 strategies are available:
+These strategies use machine learning models from [LLMRouter](https://github.com/ulab-uiuc/LLMRouter) to intelligently route queries. All 18+ strategies are available across four categories.
 
 ### Single-Round Routers
 
@@ -104,6 +104,19 @@ router_settings:
 
 **Best for:** Model quality ranking, tournament-style selection
 
+#### llmrouter-routerdc
+Dual Contrastive learning based routing (RouterDC). Uses contrastive representations.
+
+```yaml
+router_settings:
+  routing_strategy: llmrouter-routerdc
+  routing_strategy_args:
+    config_path: /app/config/routerdc_config.yaml
+```
+
+**Best for:** High accuracy, representation learning
+**Reference:** [RouterDC (NeurIPS 2024)](https://arxiv.org/abs/2409.19886)
+
 #### llmrouter-hybrid
 HybridLLM probabilistic routing. Combines multiple signals.
 
@@ -115,6 +128,7 @@ router_settings:
 ```
 
 **Best for:** Production deployments, balanced cost-quality decisions
+**Reference:** [Hybrid LLM (ICLR 2024)](https://arxiv.org/abs/2404.14618)
 
 #### llmrouter-causallm
 Causal Language Model router. Transformer-based routing decisions.
@@ -140,6 +154,7 @@ router_settings:
 ```
 
 **Best for:** Relationship modeling, complex query dependencies
+**Reference:** [GraphRouter (ICLR 2025)](https://arxiv.org/abs/2410.03834)
 **Note:** Requires PyTorch Geometric
 
 #### llmrouter-automix
@@ -153,6 +168,65 @@ router_settings:
 ```
 
 **Best for:** Ensemble approaches, quality optimization
+**Reference:** [AutoMix (NeurIPS 2024)](https://arxiv.org/abs/2310.12963)
+
+### Multi-Round Routers
+
+#### llmrouter-r1
+Pre-trained Router-R1 for multi-turn conversations. Uses reinforcement learning.
+
+```yaml
+router_settings:
+  routing_strategy: llmrouter-r1
+  routing_strategy_args:
+    config_path: /app/config/r1_config.yaml
+```
+
+**Best for:** Multi-turn conversations, complex dialogues
+**Reference:** [Router-R1 (NeurIPS 2025)](https://arxiv.org/abs/2506.09033)
+**Note:** Requires vLLM (tested with vllm==0.6.3, torch==2.4.0)
+
+### Personalized Routers
+
+#### llmrouter-gmt
+Graph-based personalized router with user preference learning.
+
+```yaml
+router_settings:
+  routing_strategy: llmrouter-gmt
+  routing_strategy_args:
+    config_path: /app/config/gmt_config.yaml
+```
+
+**Best for:** Per-user model preferences, personalized experiences
+**Reference:** [GMTRouter](https://arxiv.org/abs/2511.08590)
+
+### Agentic Routers
+
+#### llmrouter-knn-multiround
+KNN-based agentic router for complex multi-step tasks.
+
+```yaml
+router_settings:
+  routing_strategy: llmrouter-knn-multiround
+  routing_strategy_args:
+    config_path: /app/config/knn_multiround_config.yaml
+```
+
+**Best for:** Agentic workflows, multi-step reasoning
+
+#### llmrouter-llm-multiround
+LLM-based agentic router that uses an LLM to decide routing.
+
+```yaml
+router_settings:
+  routing_strategy: llmrouter-llm-multiround
+  routing_strategy_args:
+    config_path: /app/config/llm_multiround_config.yaml
+```
+
+**Best for:** Complex agentic tasks, meta-reasoning
+**Note:** Inference-only (no training required)
 
 ### Baseline Routers
 
@@ -209,4 +283,6 @@ The gateway will automatically detect model file changes and reload.
 
 ## Training Custom Models
 
-See [MLOps Training Guide](mlops-training.md) for training your own routing models.
+- [MLOps Training Guide](mlops-training.md) - Full training pipeline with Docker
+- [Training from Observability Data](observability-training.md) - Use Jaeger/Tempo/CloudWatch traces
+- [LLMRouter Data Pipeline](https://github.com/ulab-uiuc/LLMRouter#-preparing-training-data) - Official data preparation guide
