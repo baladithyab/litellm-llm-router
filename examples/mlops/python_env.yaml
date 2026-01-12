@@ -1,0 +1,19 @@
+# Python environment configuration for MLflow Projects
+# Dependencies are managed via uv
+
+python: "3.12"
+build_dependencies:
+  - pip
+  - setuptools
+  - wheel
+dependencies:
+  - mlflow>=2.10.0
+  - click
+  - pyyaml
+  - torch
+  - sentence-transformers
+  - scikit-learn
+  - pandas
+  - numpy
+  - boto3
+  - requests

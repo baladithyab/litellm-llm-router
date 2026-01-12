@@ -1,0 +1,27 @@
+# Matrix Factorization Router Training Configuration - Test
+# ==========================================================
+# Uses LLMRouter library's expected data format
+
+data_path:
+  # Routing data with query, model_name, performance, embedding_id
+  routing_data_train: /tmp/llmrouter_training/routing_train.jsonl
+  routing_data_test: /tmp/llmrouter_training/routing_test.jsonl
+  # Pre-computed query embeddings (PyTorch tensor)
+  query_embedding_data: /tmp/llmrouter_training/query_embeddings.pt
+  # LLM candidates metadata
+  llm_data: /tmp/llmrouter_training/llm_data.json
+
+hparam:
+  # MF-specific hyperparameters
+  n_factors: 50
+  learning_rate: 0.01
+  epochs: 100
+  regularization: 0.02
+
+model_path:
+  # Initial model path (optional, for fine-tuning)
+  ini_model_path: /tmp/models/mf_router/model.pt
+  # Where to save the trained model
+  save_model_path: /tmp/models/mf_router/model.pt
+  # Where to load the model for inference
+  load_model_path: /tmp/models/mf_router/model.pt

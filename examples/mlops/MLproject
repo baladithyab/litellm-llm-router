@@ -1,0 +1,92 @@
+name: llmrouter-training
+
+# MLflow Project for LLMRouter model training
+# Run with: mlflow run . -P router_type=knn -P config=configs/knn_config.yaml --env-manager local
+
+# Use local environment (assumes dependencies are installed via uv)
+# For containerized training, use docker-compose up -d llmrouter-trainer
+python_env: python_env.yaml
+
+entry_points:
+  # Main training entry point
+  train:
+    parameters:
+      router_type: {type: string, default: "knn"}
+      config: {type: path, default: "configs/knn_config.yaml"}
+      experiment_name: {type: string, default: "llmrouter-training"}
+    command: >
+      python scripts/train_router.py
+      --router-type {router_type}
+      --config {config}
+      --experiment-name {experiment_name}
+
+  # Data preparation from Jaeger traces
+  prepare_data:
+    parameters:
+      jaeger_url: {type: string, default: "http://jaeger:16686"}
+      service_name: {type: string, default: "litellm-gateway"}
+      hours_back: {type: int, default: 24}
+      output_dir: {type: path, default: "/app/data"}
+    command: >
+      python scripts/extract_jaeger_traces.py
+      --jaeger-url {jaeger_url}
+      --service-name {service_name}
+      --hours-back {hours_back}
+      --output {output_dir}/traces.jsonl &&
+      python scripts/convert_traces_to_llmrouter.py
+      --input {output_dir}/traces.jsonl
+      --output-dir {output_dir}
+
+  # Generate synthetic data for testing
+  generate_synthetic:
+    parameters:
+      count: {type: int, default: 500}
+      output_dir: {type: path, default: "/app/data"}
+    command: >
+      python scripts/generate_synthetic_traces.py
+      --output {output_dir}/synthetic_traces.jsonl
+      --count {count} &&
+      python scripts/convert_traces_to_llmrouter.py
+      --input {output_dir}/synthetic_traces.jsonl
+      --output-dir {output_dir}
+
+  # Deploy trained model
+  deploy:
+    parameters:
+      run_id: {type: string}
+      target_bucket: {type: string, default: "llmrouter-models"}
+      model_name: {type: string, default: "router_model"}
+    command: >
+      python scripts/deploy_model.py
+      --run-id {run_id}
+      --target-bucket {target_bucket}
+      --model-name {model_name}
+
+  # Full pipeline: prepare -> train -> deploy
+  pipeline:
+    parameters:
+      router_type: {type: string, default: "knn"}
+      config: {type: path, default: "configs/knn_config.yaml"}
+      jaeger_url: {type: string, default: "http://jaeger:16686"}
+    command: >
+      python -c "
+      import mlflow
+      import subprocess
+
+      # Step 1: Prepare data
+      print('📊 Step 1: Preparing data from Jaeger...')
+      subprocess.run(['python', 'scripts/extract_jaeger_traces.py',
+                      '--jaeger-url', '{jaeger_url}',
+                      '--output', '/app/data/traces.jsonl'], check=True)
+      subprocess.run(['python', 'scripts/convert_traces_to_llmrouter.py',
+                      '--input', '/app/data/traces.jsonl',
+                      '--output-dir', '/app/data'], check=True)
+
+      # Step 2: Train model
+      print('🚀 Step 2: Training {router_type} router...')
+      subprocess.run(['python', 'scripts/train_router.py',
+                      '--router-type', '{router_type}',
+                      '--config', '{config}'], check=True)
+
+      print('✅ Pipeline complete!')
+      "

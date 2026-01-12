@@ -1,17 +1,56 @@
 # MLOps Training Setup for LLMRouter
 
-This directory contains a complete MLOps setup for training, evaluating, and deploying LLMRouter routing models.
+This directory contains a complete MLOps setup for training, evaluating, and deploying LLMRouter routing models with MLflow experiment tracking.
+
+## Overview
+
+The MLOps pipeline enables you to:
+- **Generate training data** from Jaeger traces or synthetic data
+- **Train multiple router types** (KNN, SVM, MLP, Matrix Factorization, BERT, CausalLM, Hybrid)
+- **Track experiments** with MLflow including parameters, metrics, and artifacts
+- **Deploy models** to S3 or local storage for use with LiteLLM gateway
 
 ## Quick Start
 
+### Option 1: Local Development (Recommended for Testing)
+
 ```bash
-# Start the MLOps stack
+# 1. Install dependencies
+uv pip install --system mlflow torch sentence-transformers scikit-learn pandas pyyaml click
+
+# 2. Start MLflow server
+cd examples/mlops
+docker compose -f docker-compose.mlops.yml up -d mlflow
+
+# 3. Generate synthetic training data
+mkdir -p /tmp/llmrouter_training
+MLFLOW_TRACKING_URI=http://localhost:5000 \
+mlflow run . --entry-point generate_synthetic \
+  -P count=500 \
+  -P output_dir=/tmp/llmrouter_training \
+  --env-manager local
+
+# 4. Train a router model
+MLFLOW_TRACKING_URI=http://localhost:5000 \
+mlflow run . --entry-point train \
+  -P router_type=knn \
+  -P config=$(pwd)/configs/test_knn_config.yaml \
+  --env-manager local
+
+# 5. View results in MLflow UI
+open http://localhost:5000
+```
+
+### Option 2: Full Docker Stack
+
+```bash
+# Start all services
 docker compose -f docker-compose.mlops.yml up -d
 
 # Access services:
 # - MLflow UI: http://localhost:5000
 # - Jupyter Lab: http://localhost:8888 (token: llmrouter)
-# - MinIO Console: http://localhost:9001 (admin/minioadmin)
+# - MinIO Console: http://localhost:9001 (minioadmin/minioadmin)
 ```
 
 ## Components
@@ -19,92 +58,173 @@ docker compose -f docker-compose.mlops.yml up -d
 | Service | Port | Description |
 |---------|------|-------------|
 | MLflow | 5000 | Experiment tracking & model registry |
-| MinIO | 9000/9001 | S3-compatible object storage |
+| MinIO | 9000/9001 | S3-compatible object storage for artifacts |
 | Jupyter | 8888 | Interactive development environment |
 | Trainer | - | GPU-enabled training container |
 | Deployer | - | Model deployment to production |
 
-## Training Workflow
+## MLflow Project Entry Points
 
-### 1. Prepare Data
+The `MLproject` file defines several entry points:
 
-Place your training data in `data/`:
-
+### `generate_synthetic` - Generate Training Data
 ```bash
-data/
-├── train.json      # Training queries with labels
-├── val.json        # Validation data
-└── test.json       # Test data
+mlflow run . --entry-point generate_synthetic \
+  -P count=500 \
+  -P output_dir=/tmp/llmrouter_training \
+  --env-manager local
 ```
 
-### 2. Create Config
+### `train` - Train a Router Model
+```bash
+mlflow run . --entry-point train \
+  -P router_type=knn \
+  -P config=configs/knn_config.yaml \
+  -P experiment_name=llmrouter-training \
+  --env-manager local
+```
 
-Create a config in `configs/`:
+Supported router types:
+- `knn` - K-Nearest Neighbors router
+- `svm` - Support Vector Machine router
+- `mlp` - Multi-Layer Perceptron router
+- `mf` - Matrix Factorization router
+- `bert` - BERT-based router (RouterDC)
+- `causallm` - Causal Language Model router
+- `hybrid` - Hybrid LLM router
 
+### `prepare_data` - Extract from Jaeger Traces
+```bash
+mlflow run . --entry-point prepare_data \
+  -P jaeger_url=http://jaeger:16686 \
+  -P service_name=litellm-gateway \
+  -P hours_back=24 \
+  --env-manager local
+```
+
+### `deploy` - Deploy Trained Model
+```bash
+mlflow run . --entry-point deploy \
+  -P run_id=<mlflow_run_id> \
+  -P target_bucket=llmrouter-models \
+  -P model_name=router_model \
+  --env-manager local
+```
+
+## Training Data Format
+
+### Input: Traces (JSONL)
+```json
+{"query": "What is machine learning?", "model_name": "claude-3-haiku", "latency_ms": 150, "cost": 0.001, "quality_score": 0.85, "timestamp": "2024-01-15T10:30:00Z"}
+```
+
+### Output: Routing Data (JSONL)
+```json
+{"query": "What is machine learning?", "model_name": "claude-3-haiku", "performance": 0.85, "embedding_id": 0}
+```
+
+### Output: Query Embeddings (PyTorch)
+```python
+# query_embeddings.pt - Shape: [num_unique_queries, embedding_dim]
+torch.Size([100, 384])  # Using all-MiniLM-L6-v2
+```
+
+## Configuration Files
+
+### KNN Router Config (`configs/knn_config.yaml`)
 ```yaml
-# configs/knn_config.yaml
 data_path:
-  train_data: /app/data/train.json
-  llm_data: /app/data/llm_candidates.json
+  routing_data_train: /tmp/llmrouter_training/routing_train.jsonl
+  routing_data_test: /tmp/llmrouter_training/routing_test.jsonl
+  query_embedding_data: /tmp/llmrouter_training/query_embeddings.pt
+  llm_data: /tmp/llmrouter_training/llm_data.json
 
 hparam:
   k: 5
-  embedding_model: all-MiniLM-L6-v2
+  distance_metric: cosine
+  weighted: true
 ```
 
-### 3. Train Model
+### MLP Router Config (`configs/mlp_config.yaml`)
+```yaml
+data_path:
+  routing_data_train: /tmp/llmrouter_training/routing_train.jsonl
+  routing_data_test: /tmp/llmrouter_training/routing_test.jsonl
+  query_embedding_data: /tmp/llmrouter_training/query_embeddings.pt
+  llm_data: /tmp/llmrouter_training/llm_data.json
 
-```bash
-docker compose exec llmrouter-trainer python /app/scripts/train_router.py \
-  --router-type knn \
-  --config /app/configs/knn_config.yaml \
-  --experiment-name my-experiment
+hparam:
+  hidden_dims: [256, 128]
+  learning_rate: 0.001
+  epochs: 100
+  batch_size: 32
+  dropout: 0.2
 ```
 
-### 4. Evaluate
-
-View results in MLflow: http://localhost:5000
-
-### 5. Deploy
-
-```bash
-docker compose exec model-deployer python /app/scripts/deploy_model.py \
-  --model-name knn-router \
-  --model-stage Production \
-  --s3-bucket my-production-bucket
-```
 
 ## Directory Structure
 
 ```
 examples/mlops/
 ├── docker-compose.mlops.yml   # MLOps stack definition
-├── Dockerfile.trainer         # Training environment
+├── MLproject                  # MLflow project definition
+├── python_env.yaml            # Python environment for MLflow
+├── Dockerfile.trainer         # Training environment (GPU-enabled)
 ├── Dockerfile.deployer        # Deployment tools
 ├── scripts/
-│   ├── train_router.py       # Training script
-│   └── deploy_model.py       # Deployment script
-├── configs/                   # Training configurations
-├── data/                      # Training data
-├── models/                    # Trained models
-└── notebooks/                 # Jupyter notebooks
+│   ├── train_router.py               # Main training script
+│   ├── generate_synthetic_traces.py  # Synthetic data generator
+│   ├── convert_traces_to_llmrouter.py # Convert traces to training format
+│   ├── extract_jaeger_traces.py      # Extract traces from Jaeger
+│   └── deploy_model.py               # Model deployment script
+├── configs/
+│   ├── knn_config.yaml        # KNN router configuration
+│   ├── mlp_config.yaml        # MLP router configuration
+│   └── test_knn_config.yaml   # Test configuration
+├── data/                      # Training data directory
+├── models/                    # Trained models output
+└── notebooks/                 # Jupyter notebooks for exploration
 ```
 
-## Using with AWS S3
+## Integration with LiteLLM Gateway
 
-Set AWS credentials:
+After training a model, you can integrate it with the LiteLLM gateway:
 
-```bash
-export AWS_ACCESS_KEY_ID=your_key
-export AWS_SECRET_ACCESS_KEY=your_secret
+### 1. Configure Router Strategy
+
+In your LiteLLM config (`litellm_config.yaml`):
+
+```yaml
+router_settings:
+  routing_strategy: llmrouter-knn
+  routing_strategy_args:
+    model_path: /path/to/trained/model
+    # Or load from S3:
+    model_s3_bucket: your-bucket
+    model_s3_key: models/knn-router/
+    hot_reload: true
+    reload_interval: 300  # Check for updates every 5 minutes
 ```
 
-Deploy to S3:
+### 2. Use Custom Routing Callback
 
-```bash
-docker compose exec model-deployer python /app/scripts/deploy_model.py \
-  --model-name knn-router \
-  --s3-bucket your-production-bucket
+```python
+from litellm import Router
+from litellm.integrations.llmrouter import LLMRouterCallback
+
+router = Router(
+    model_list=[...],
+    routing_strategy="llmrouter-knn",
+    routing_strategy_args={
+        "model_path": "/tmp/models/knn_router"
+    }
+)
+
+# The router will use the trained model for routing decisions
+response = router.completion(
+    model="gpt-4",  # Will be routed based on query
+    messages=[{"role": "user", "content": "Explain quantum computing"}]
+)
 ```
 
 ## GPU Training
@@ -113,19 +233,94 @@ The trainer container supports NVIDIA GPUs. Ensure you have:
 - NVIDIA drivers installed
 - nvidia-container-toolkit installed
 
-GPU resources are automatically allocated via Docker.
+GPU resources are automatically allocated via Docker for training intensive models like BERT and CausalLM routers.
 
-## Integration with Production Gateway
+## Using with AWS S3
 
-After deploying a model, update your gateway config:
+Set AWS credentials for artifact storage:
 
-```yaml
-router_settings:
-  routing_strategy: llmrouter-knn
-  routing_strategy_args:
-    model_s3_bucket: your-production-bucket
-    model_s3_key: models/knn-router/
-    hot_reload: true
+```bash
+export AWS_ACCESS_KEY_ID=your_key
+export AWS_SECRET_ACCESS_KEY=your_secret
+export AWS_DEFAULT_REGION=us-east-1
 ```
 
-The gateway will automatically load the new model.
+Deploy trained model to S3:
+
+```bash
+MLFLOW_TRACKING_URI=http://localhost:5000 \
+mlflow run . --entry-point deploy \
+  -P run_id=<your_mlflow_run_id> \
+  -P target_bucket=your-production-bucket \
+  -P model_name=knn-router \
+  --env-manager local
+```
+
+## Troubleshooting
+
+### MLflow Connection Issues
+```bash
+# Check MLflow is running
+curl http://localhost:5000/health
+
+# Restart MLflow
+docker compose -f docker-compose.mlops.yml restart mlflow
+```
+
+### Missing Dependencies
+```bash
+# Install all required packages
+uv pip install --system mlflow torch sentence-transformers scikit-learn pandas pyyaml click boto3
+```
+
+### Permission Errors with Artifacts
+When running locally, artifact logging may fail due to Docker volume permissions. Models are still saved to the local `output_dir`.
+
+### Data Path Issues
+Ensure your config file paths match where data was generated:
+```yaml
+data_path:
+  routing_data_train: /tmp/llmrouter_training/routing_train.jsonl  # Must exist!
+```
+
+## Example: Full Training Pipeline
+
+```bash
+# 1. Start MLflow
+cd examples/mlops
+docker compose -f docker-compose.mlops.yml up -d mlflow
+
+# 2. Generate training data (500 samples)
+mkdir -p /tmp/llmrouter_training
+MLFLOW_TRACKING_URI=http://localhost:5000 \
+mlflow run . --entry-point generate_synthetic \
+  -P count=500 \
+  -P output_dir=/tmp/llmrouter_training \
+  --env-manager local
+
+# 3. Train KNN router
+MLFLOW_TRACKING_URI=http://localhost:5000 \
+mlflow run . --entry-point train \
+  -P router_type=knn \
+  -P config=$(pwd)/configs/test_knn_config.yaml \
+  --env-manager local
+
+# 4. Train SVM router (update config paths first)
+MLFLOW_TRACKING_URI=http://localhost:5000 \
+mlflow run . --entry-point train \
+  -P router_type=svm \
+  -P config=$(pwd)/configs/test_knn_config.yaml \
+  --env-manager local
+
+# 5. View all experiments
+open http://localhost:5000
+
+# 6. Clean up
+docker compose -f docker-compose.mlops.yml down
+```
+
+## Related Documentation
+
+- [LLMRouter Library](https://github.com/your-org/llmrouter) - The underlying routing library
+- [LiteLLM Documentation](https://docs.litellm.ai/) - LiteLLM gateway documentation
+- [MLflow Documentation](https://mlflow.org/docs/latest/) - MLflow experiment tracking

@@ -7,19 +7,20 @@ LABEL org.opencontainers.image.description="LLMRouter Training Environment"
 
 WORKDIR /app
 
-# Install system dependencies
+# Install system dependencies + uv
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     curl \
     wget \
     vim \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# Install Python dependencies
-RUN pip install --no-cache-dir --upgrade pip setuptools wheel
+ENV PATH="/root/.local/bin:$PATH"
 
-# Install ML/Training dependencies
-RUN pip install --no-cache-dir \
+# Install ML/Training dependencies with uv
+RUN uv pip install --system --no-cache \
     mlflow>=2.10.0 \
     wandb \
     jupyter \
@@ -35,16 +36,18 @@ RUN pip install --no-cache-dir \
     peft \
     bitsandbytes \
     sentencepiece \
+    sentence-transformers \
     boto3 \
     pyyaml \
     tqdm \
-    optuna
+    optuna \
+    click
 
-# Install LLMRouter
-COPY reference/LLMRouter /tmp/LLMRouter
-RUN cd /tmp/LLMRouter && pip install --no-cache-dir -e .
+# Install LLMRouter from GitHub
+RUN uv pip install --system --no-cache git+https://github.com/ulab-uiuc/LLMRouter.git
 
-# Copy training utilities
+# Copy MLproject and training utilities
+COPY examples/mlops/MLproject /app/MLproject
 COPY examples/mlops/scripts /app/scripts
 
 # Create data directories
