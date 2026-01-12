@@ -46,7 +46,12 @@ litellm_settings:
   # Logging
   set_verbose: true
   drop_params: true  # Drop unsupported params instead of erroring
-  
+
+  # OpenTelemetry callback for native tracing
+  # Set OTEL_EXPORTER_OTLP_ENDPOINT env var to enable
+  success_callback: ["otel"]
+  failure_callback: ["otel"]
+
   # AWS Region (uses instance metadata if not set)
   # aws_region_name: us-east-1
 
