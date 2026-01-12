@@ -6,12 +6,12 @@ This module implements the integration between LLMRouter's ML-based
 routing strategies and LiteLLM's routing infrastructure.
 """
 
-import os
 import json
+import os
 import threading
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, Optional
 
 from litellm._logging import verbose_proxy_logger
 
@@ -106,9 +106,9 @@ class LLMRouterStrategyFamily:
             current_mtime = Path(self.model_path).stat().st_mtime
             if current_mtime > self._model_mtime:
                 return True
-        except:
+        except OSError:
             pass
-        
+
         return False
     
     def _load_router(self):
@@ -185,7 +185,7 @@ class LLMRouterStrategyFamily:
                 if self.model_path:
                     try:
                         self._model_mtime = Path(self.model_path).stat().st_mtime
-                    except:
+                    except OSError:
                         pass
         return self._router
 
