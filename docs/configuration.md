@@ -119,3 +119,33 @@ The `llm_candidates.json` file describes available models for LLMRouter:
   }
 }
 ```
+
+## Local Testing Stack
+
+For local development and testing, use the local test docker-compose:
+
+```bash
+# Start all services
+docker compose -f docker-compose.local-test.yml up -d
+
+# Access services:
+# - LiteLLM Gateway: http://localhost:4010
+# - Jaeger UI: http://localhost:16686
+# - MLflow UI: http://localhost:5050
+# - MinIO Console: http://localhost:9001
+
+# Run integration tests
+pytest tests/integration/test_local_stack.py -v
+
+# Stop the stack
+docker compose -f docker-compose.local-test.yml down
+```
+
+The local stack includes:
+- **LiteLLM Gateway** with all features enabled (A2A, MCP, hot reload)
+- **PostgreSQL** for persistence
+- **Redis** for caching
+- **Jaeger** for distributed tracing
+- **MLflow** for experiment tracking
+- **MinIO** for S3-compatible storage
+- **MCP Proxy** for MCP server access

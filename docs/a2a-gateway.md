@@ -122,21 +122,30 @@ print(card)
 
 ## Multi-Agent Architecture
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                      A2A Gateway                                │
-├─────────────────────────────────────────────────────────────────┤
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐  │
-│  │  Agent      │  │  Agent      │  │  Agent                  │  │
-│  │  Registry   │◄─│  Discovery  │◄─│  Router                 │  │
-│  └─────────────┘  └─────────────┘  └─────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────┘
-         │                 │                      │
-         ▼                 ▼                      ▼
-   ┌─────────┐       ┌─────────┐           ┌─────────┐
-   │ Agent A │       │ Agent B │           │ Agent C │
-   │ (Chat)  │       │ (Code)  │           │ (Search)│
-   └─────────┘       └─────────┘           └─────────┘
+```mermaid
+flowchart TB
+    subgraph gateway["A2A Gateway"]
+        registry["Agent Registry"]
+        discovery["Agent Discovery"]
+        router["Agent Router"]
+        discovery --> registry
+        router --> discovery
+    end
+
+    subgraph agents["Registered Agents"]
+        agentA["Agent A<br/>(Chat)"]
+        agentB["Agent B<br/>(Code)"]
+        agentC["Agent C<br/>(Search)"]
+    end
+
+    registry --> agentA
+    registry --> agentB
+    registry --> agentC
+
+    client["Client Request"] --> router
+    router -->|"route"| agentA
+    router -->|"route"| agentB
+    router -->|"route"| agentC
 ```
 
 ## Configuration Options

@@ -6,10 +6,35 @@ This guide explains how to collect LLM request/response trace data from observab
 
 The training pipeline consists of three stages:
 
-```
-Observability Backend → Extract Traces → Transform to Training Data → Train Router
-     (Jaeger/Tempo/         (API/Query)     (JSONL format)         (LLMRouter CLI)
-      CloudWatch)
+```mermaid
+flowchart LR
+    subgraph observability["Observability Backend"]
+        jaeger["Jaeger"]
+        tempo["Grafana Tempo"]
+        cloudwatch["CloudWatch X-Ray"]
+    end
+
+    subgraph extraction["Trace Extraction"]
+        extract["Extract Traces<br/>(API/Query)"]
+    end
+
+    subgraph transform["Data Processing"]
+        label["Label Performance<br/>(LLM-as-Judge)"]
+        format["Transform to JSONL"]
+        embed["Generate Embeddings"]
+    end
+
+    subgraph training["Model Training"]
+        train["Train Router<br/>(LLMRouter CLI)"]
+        mlflow["MLflow Tracking"]
+        deploy["Deploy to S3"]
+    end
+
+    jaeger --> extract
+    tempo --> extract
+    cloudwatch --> extract
+    extract --> label --> format --> embed --> train
+    train --> mlflow --> deploy
 ```
 
 ## Prerequisites

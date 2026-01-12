@@ -141,21 +141,30 @@ mcp_servers:
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                      MCP Gateway                                │
-├─────────────────────────────────────────────────────────────────┤
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐  │
-│  │  Server     │  │  Tool       │  │  Resource               │  │
-│  │  Registry   │◄─│  Discovery  │◄─│  Manager                │  │
-│  └─────────────┘  └─────────────┘  └─────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────┘
-         │                 │                      │
-         ▼                 ▼                      ▼
-   ┌─────────┐       ┌─────────┐           ┌─────────┐
-   │ Search  │       │ File    │           │ Database│
-   │ MCP     │       │ MCP     │           │ MCP     │
-   └─────────┘       └─────────┘           └─────────┘
+```mermaid
+flowchart TB
+    subgraph gateway["MCP Gateway"]
+        registry["Server Registry"]
+        tools["Tool Discovery"]
+        resources["Resource Manager"]
+        tools --> registry
+        resources --> registry
+    end
+
+    subgraph servers["MCP Servers"]
+        search["Search MCP"]
+        file["File MCP"]
+        database["Database MCP"]
+    end
+
+    registry --> search
+    registry --> file
+    registry --> database
+
+    llm["LLM Request"] --> tools
+    tools -->|"invoke"| search
+    tools -->|"invoke"| file
+    resources -->|"read"| database
 ```
 
 ## Configuration Options
