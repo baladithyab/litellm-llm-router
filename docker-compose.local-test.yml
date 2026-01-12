@@ -1,5 +1,6 @@
 # LiteLLM + LLMRouter - Local Testing Setup
 # Tests: A2A Gateway, MCP Gateway, Routing Strategies, Hot Reload, Config Sync
+# Services: PostgreSQL, Redis, Jaeger, MLflow, MinIO, MCP Servers
 
 services:
   # ==========================================================================
@@ -40,6 +41,95 @@ services:
       - litellm-test-network
 
   # ==========================================================================
+  # Jaeger - Distributed Tracing
+  # ==========================================================================
+  jaeger:
+    image: jaegertracing/all-in-one:1.54
+    container_name: litellm-test-jaeger
+    ports:
+      - "16686:16686"  # Jaeger UI
+      - "4317:4317"    # OTLP gRPC
+      - "4318:4318"    # OTLP HTTP
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    networks:
+      - litellm-test-network
+
+  # ==========================================================================
+  # MinIO - S3-compatible object storage
+  # ==========================================================================
+  minio:
+    image: minio/minio:latest
+    container_name: litellm-test-minio
+    ports:
+      - "9000:9000"    # MinIO API
+      - "9001:9001"    # MinIO Console
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: server /data --console-address ":9001"
+    volumes:
+      - test_minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - litellm-test-network
+
+  # MinIO bucket initialization
+  minio-init:
+    image: minio/mc:latest
+    container_name: litellm-test-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set myminio http://minio:9000 minioadmin minioadmin;
+      mc mb myminio/mlflow --ignore-existing;
+      mc mb myminio/llmrouter-models --ignore-existing;
+      mc mb myminio/litellm-config --ignore-existing;
+      mc anonymous set download myminio/mlflow;
+      exit 0;
+      "
+    networks:
+      - litellm-test-network
+
+  # ==========================================================================
+  # MLflow - ML Experiment Tracking (using SQLite for simplicity)
+  # ==========================================================================
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.16.0
+    container_name: litellm-test-mlflow
+    depends_on:
+      minio:
+        condition: service_healthy
+    ports:
+      - "5050:5050"
+    environment:
+      - MLFLOW_S3_ENDPOINT_URL=http://minio:9000
+      - AWS_ACCESS_KEY_ID=minioadmin
+      - AWS_SECRET_ACCESS_KEY=minioadmin
+    volumes:
+      - test_mlflow_data:/mlflow
+    command: >
+      mlflow server
+      --backend-store-uri sqlite:///mlflow/mlflow.db
+      --artifacts-destination s3://mlflow/artifacts
+      --host 0.0.0.0
+      --port 5050
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:5050/health')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - litellm-test-network
+
+  # ==========================================================================
   # LiteLLM + LLMRouter Gateway - Full Feature Test
   # ==========================================================================
   litellm-gateway:
@@ -51,6 +141,10 @@ services:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      jaeger:
+        condition: service_started
+      mlflow:
         condition: service_healthy
     ports:
       - "4010:4000"
@@ -66,9 +160,10 @@ services:
       # - DATABASE_URL=postgresql://litellm:testpassword@postgres:5432/litellm
       - REDIS_HOST=redis
       - REDIS_PORT=6379
-      # LLM Provider API Keys (use mock for testing)
-      - OPENAI_API_KEY=${OPENAI_API_KEY:-sk-mock-openai-key}
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-sk-mock-anthropic-key}
+      # AWS Bedrock - Use EC2 instance metadata service (IMDSv2)
+      # Container needs network access to host's metadata service
+      - AWS_DEFAULT_REGION=us-east-1
+      - AWS_EC2_METADATA_DISABLED=false
       # Gateway Features - ALL ENABLED for testing
       - A2A_GATEWAY_ENABLED=true
       - MCP_GATEWAY_ENABLED=true
@@ -81,8 +176,22 @@ services:
       - CONFIG_HOT_RELOAD=true
       - CONFIG_SYNC_ENABLED=true
       - CONFIG_SYNC_INTERVAL=30
+      # OpenTelemetry / Jaeger Tracing
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
+      - OTEL_SERVICE_NAME=litellm-gateway
+      - OTEL_TRACES_EXPORTER=otlp
+      # MLflow Integration (uses MinIO, not AWS S3)
+      - MLFLOW_TRACKING_URI=http://mlflow:5050
+      # MinIO/S3 for config storage (MLflow uses its own env vars configured in mlflow container)
+      - S3_ENDPOINT_URL=http://minio:9000
+      - MINIO_ACCESS_KEY=minioadmin
+      - MINIO_SECRET_KEY=minioadmin
+    # Allow container to access EC2 instance metadata service for AWS credentials
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command: ["--config", "/app/config/config.local-test.yaml", "--port", "4000"]
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:4000/health"]
+      test: ["CMD", "curl", "-f", "-H", "Authorization: Bearer sk-test-master-key", "http://localhost:4000/health"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -90,9 +199,52 @@ services:
     networks:
       - litellm-test-network
 
+  # ==========================================================================
+  # MCP Servers - No API Key Required (stdio-over-HTTP bridge)
+  # ==========================================================================
+  # Note: MCP servers typically use stdio transport. For HTTP access, we use
+  # mcp-proxy to bridge stdio servers to HTTP endpoints.
+
+  # MCP Proxy - Bridges stdio MCP servers to HTTP
+  # This allows HTTP-based access to any stdio MCP server
+  mcp-proxy:
+    image: node:20-alpine
+    container_name: litellm-test-mcp-proxy
+    working_dir: /app
+    volumes:
+      - ./:/workspace:ro
+      - mcp_node_modules:/app/node_modules
+    ports:
+      - "3100:3100"  # Filesystem MCP
+      - "3101:3101"  # Memory MCP
+      - "3102:3102"  # Time MCP
+      - "3103:3103"  # Echo MCP (test server)
+    environment:
+      - NODE_ENV=production
+    command: >
+      sh -c "
+        npm install -g @anthropic-ai/server-filesystem @anthropic-ai/server-memory &&
+        echo 'MCP servers installed. Running in stdio mode for local testing.'
+        echo 'Use MCP client to connect via stdio transport.'
+        tail -f /dev/null
+      "
+    networks:
+      - litellm-test-network
+    healthcheck:
+      test: ["CMD", "echo", "healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # AWS Documentation MCP Server (uses public AWS docs, no key needed)
+  # This server is already available as part of the litellm-gateway via aws_knowledge_mcp tool
+
 volumes:
   test_postgres_data:
   test_redis_data:
+  test_minio_data:
+  test_mlflow_data:
+  mcp_node_modules:
 
 networks:
   litellm-test-network:

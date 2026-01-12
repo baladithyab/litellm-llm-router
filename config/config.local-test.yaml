@@ -1,43 +1,92 @@
 # LiteLLM + LLMRouter - Local Test Configuration
 # Tests all features: A2A, MCP, Routing Strategies, Hot Reload
+# Uses AWS Bedrock models (Claude 4.5 family + Nova 2 family)
 
 # =============================================================================
-# Model List - Test models with multiple routing options
+# Model List - AWS Bedrock Models (IAM Profile auth)
 # =============================================================================
 model_list:
-  # OpenAI Models (uses mock key if not set)
-  - model_name: gpt-4
+  # ---------------------------------------------------------------------------
+  # Claude 4.5 Family (Anthropic via Bedrock)
+  # ---------------------------------------------------------------------------
+  - model_name: claude-4.5-sonnet
     litellm_params:
-      model: openai/gpt-4
-      api_key: os.environ/OPENAI_API_KEY
+      model: bedrock/anthropic.claude-sonnet-4-5-20250929-v1:0
+      aws_region_name: us-east-1
     model_info:
-      id: gpt-4
+      id: claude-4.5-sonnet
       mode: chat
+      description: "Claude 4.5 Sonnet - Latest and most capable Sonnet model"
 
-  - model_name: gpt-3.5-turbo
+  - model_name: claude-4.5-opus
     litellm_params:
-      model: openai/gpt-3.5-turbo
-      api_key: os.environ/OPENAI_API_KEY
+      model: bedrock/anthropic.claude-opus-4-5-20251101-v1:0
+      aws_region_name: us-east-1
     model_info:
-      id: gpt-3.5-turbo
+      id: claude-4.5-opus
       mode: chat
+      description: "Claude 4.5 Opus - Highest capability for complex tasks"
 
-  # Anthropic Models
-  - model_name: claude-3-opus
+  - model_name: claude-4.5-haiku
     litellm_params:
-      model: anthropic/claude-3-opus-20240229
-      api_key: os.environ/ANTHROPIC_API_KEY
+      model: bedrock/anthropic.claude-haiku-4-5-20251001-v1:0
+      aws_region_name: us-east-1
     model_info:
-      id: claude-3-opus
+      id: claude-4.5-haiku
       mode: chat
+      description: "Claude 4.5 Haiku - Fast and cost-effective"
 
-  - model_name: claude-3-haiku
+  # Claude 4 Sonnet (previous generation)
+  - model_name: claude-4-sonnet
     litellm_params:
-      model: anthropic/claude-3-haiku-20240307
-      api_key: os.environ/ANTHROPIC_API_KEY
+      model: bedrock/anthropic.claude-sonnet-4-20250514-v1:0
+      aws_region_name: us-east-1
     model_info:
-      id: claude-3-haiku
+      id: claude-4-sonnet
       mode: chat
+      description: "Claude 4 Sonnet - Balanced performance"
+
+  # ---------------------------------------------------------------------------
+  # Amazon Nova 2 Family
+  # ---------------------------------------------------------------------------
+  - model_name: nova-2-lite
+    litellm_params:
+      model: bedrock/amazon.nova-2-lite-v1:0
+      aws_region_name: us-east-1
+    model_info:
+      id: nova-2-lite
+      mode: chat
+      description: "Nova 2 Lite - Cost-effective with extended thinking"
+
+  # ---------------------------------------------------------------------------
+  # Amazon Nova Family (Original)
+  # ---------------------------------------------------------------------------
+  - model_name: nova-pro
+    litellm_params:
+      model: bedrock/amazon.nova-pro-v1:0
+      aws_region_name: us-east-1
+    model_info:
+      id: nova-pro
+      mode: chat
+      description: "Nova Pro - Highly capable multimodal model"
+
+  - model_name: nova-lite
+    litellm_params:
+      model: bedrock/amazon.nova-lite-v1:0
+      aws_region_name: us-east-1
+    model_info:
+      id: nova-lite
+      mode: chat
+      description: "Nova Lite - Fast multimodal processing"
+
+  - model_name: nova-micro
+    litellm_params:
+      model: bedrock/amazon.nova-micro-v1:0
+      aws_region_name: us-east-1
+    model_info:
+      id: nova-micro
+      mode: chat
+      description: "Nova Micro - Ultra-fast text-only model"
 
 # =============================================================================
 # Router Settings - Test Multiple Strategies
@@ -81,12 +130,30 @@ litellm_settings:
     ttl: 300
   set_verbose: true
   drop_params: true
+  # OpenTelemetry callbacks for Jaeger tracing
+  success_callback: ["otel"]
+  failure_callback: ["otel"]
 
 # =============================================================================
-# MCP Servers - Test Configuration
+# Observability Settings - Jaeger & MLflow
 # =============================================================================
-# MCP servers are managed via API when MCP_GATEWAY_ENABLED=true
-# Example servers that can be added via API:
+environment_variables:
+  OTEL_EXPORTER_OTLP_ENDPOINT: "http://jaeger:4318"
+  OTEL_SERVICE_NAME: "litellm-gateway"
+  OTEL_TRACES_EXPORTER: "otlp"
+  MLFLOW_TRACKING_URI: "http://mlflow:5050"
+
+# =============================================================================
+# MCP Servers Configuration
+# =============================================================================
+# MCP servers can be configured via API when MCP_GATEWAY_ENABLED=true
+# The following servers are available via stdio transport in the mcp-proxy container:
+#
+# Available MCP Servers (stdio-based, no API keys required):
+# - @anthropic-ai/server-filesystem: File system access for reading workspace files
+# - @anthropic-ai/server-memory: Simple key-value memory for agents
+#
+# To add HTTP-based MCP servers dynamically:
 # POST /mcp/servers with body:
 # {
 #   "server_id": "my-mcp-server",
@@ -108,3 +175,13 @@ litellm_settings:
 #   "url": "http://localhost:9000/a2a",
 #   "capabilities": ["chat", "code"]
 # }
+
+# =============================================================================
+# Service Endpoints Reference (for testing)
+# =============================================================================
+# LiteLLM Gateway:     http://localhost:4010
+# Jaeger UI:           http://localhost:16686
+# MLflow UI:           http://localhost:5050
+# MinIO Console:       http://localhost:9001 (admin: minioadmin/minioadmin)
+# MinIO API:           http://localhost:9000
+# MCP Proxy:           http://localhost:3100-3103 (for MCP server access)

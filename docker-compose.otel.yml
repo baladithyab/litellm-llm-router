@@ -1,5 +1,5 @@
 # LiteLLM + LLMRouter with Jaeger Tracing
-# Simple OTEL setup for local development
+# OTEL setup for local development and MLOps testing
 #
 # Usage:
 #   docker-compose -f docker-compose.otel.yml up -d
@@ -7,6 +7,9 @@
 # Access:
 #   - LiteLLM Gateway: http://localhost:4001
 #   - Jaeger UI:       http://localhost:16686
+#
+# Test MLOps Pipeline:
+#   ./scripts/test_mlops_pipeline.sh
 
 services:
   litellm-gateway-otel:
@@ -17,10 +20,13 @@ services:
     ports:
       - "4001:4000"
     volumes:
-      - ./config/config.bedrock.yaml:/app/config/config.yaml:ro
+      - ./config/config.local-test.yaml:/app/config/config.yaml:ro
       - ./models:/app/models:ro
     environment:
       - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY:-sk-dev-key}
+      # API Keys (optional - uses mock responses if not set)
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-sk-mock-key}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-sk-mock-key}
       - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-us-east-1}
       # OpenTelemetry Configuration
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
@@ -29,8 +35,12 @@ services:
       - OTEL_TRACES_EXPORTER=otlp
       - OTEL_METRICS_EXPORTER=none
       - OTEL_LOGS_EXPORTER=none
+      # Redis (optional)
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
     depends_on:
       - jaeger
+      - redis
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:4000/health/liveliness"]
       interval: 30s
@@ -38,9 +48,12 @@ services:
       retries: 3
       start_period: 15s
     restart: unless-stopped
+    networks:
+      - otel-network
 
   jaeger:
     image: jaegertracing/all-in-one:1.54
+    container_name: jaeger-otel
     ports:
       - "16686:16686"  # Jaeger UI
       - "4317:4317"    # OTLP gRPC
@@ -49,3 +62,18 @@ services:
       - COLLECTOR_OTLP_ENABLED=true
       - LOG_LEVEL=info
     restart: unless-stopped
+    networks:
+      - otel-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: litellm-redis-otel
+    ports:
+      - "6380:6379"
+    restart: unless-stopped
+    networks:
+      - otel-network
+
+networks:
+  otel-network:
+    driver: bridge
