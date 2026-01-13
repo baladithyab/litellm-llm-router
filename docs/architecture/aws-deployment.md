@@ -2,6 +2,53 @@
 
 This guide covers deploying LiteLLM + LLMRouter to AWS using various compute options.
 
+## Component Overview
+
+### Mandatory Components
+
+| Component | Description | Local Testing | AWS Production |
+|-----------|-------------|---------------|----------------|
+| **LiteLLM Gateway** | Core API proxy and routing engine | Docker container | ECS/EKS/Fargate/Lambda |
+
+### Optional Components
+
+| Component | Purpose | Local Testing | AWS Production Alternative |
+|-----------|---------|---------------|---------------------------|
+| **PostgreSQL** | API key mgmt, spend tracking, team mgmt | Docker (postgres) | **Amazon RDS** or **Aurora PostgreSQL** |
+| **Redis** | Caching, rate limiting, session store | Docker (redis) | **ElastiCache Redis/Valkey** or **MemoryDB** |
+| **Object Storage** | Config files, ML models, artifacts | Docker (minio) | **Amazon S3** |
+| **Tracing/OTEL** | Distributed tracing, observability | Docker (jaeger) | **AWS X-Ray**, **CloudWatch**, **Amazon Managed Grafana** |
+| **MLflow** | Model experiment tracking | Docker (mlflow) | **SageMaker**, **S3 + DynamoDB**, or **self-hosted on ECS** |
+
+> **Note**: The LiteLLM Gateway can run in a **minimal configuration** with just environment variables and no external dependencies. Add optional components as needed for your use case.
+
+### Minimal Deployment (Gateway Only)
+
+For simple use cases, deploy just the gateway with environment variables:
+
+```bash
+# No database, no Redis, no external storage
+docker run -p 4000:4000 \
+  -e LITELLM_MASTER_KEY=sk-your-key \
+  -e AWS_REGION=us-east-1 \
+  litellm-llmrouter:latest
+```
+
+### Full Production Deployment
+
+For enterprise use with spend tracking, team management, and caching:
+
+```bash
+# With RDS, ElastiCache, S3, and X-Ray
+docker run -p 4000:4000 \
+  -e LITELLM_MASTER_KEY=sk-your-key \
+  -e DATABASE_URL=postgresql://user:pass@rds-endpoint:5432/litellm \
+  -e REDIS_HOST=elasticache-endpoint \
+  -e CONFIG_S3_BUCKET=my-config-bucket \
+  -e OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317 \
+  litellm-llmrouter:latest
+```
+
 ## Architecture Overview
 
 ```
@@ -13,19 +60,19 @@ This guide covers deploying LiteLLM + LLMRouter to AWS using various compute opt
 │  │  │  Public Subnet(s)  │    │  Private Subnet(s)  │                    │   │
 │  │  │                    │    │                     │                    │   │
 │  │  │  ┌──────────────┐  │    │  ┌───────────────┐  │                    │   │
-│  │  │  │     ALB      │  │    │  │  ECS/EKS/     │  │                    │   │
+│  │  │  │     ALB      │  │    │  │  ECS/EKS/     │  │  ◄── MANDATORY    │   │
 │  │  │  │ (Internet    │──┼────┼──│  Fargate      │  │                    │   │
-│  │  │  │  Facing)     │  │    │  │  Cluster      │  │                    │   │
+│  │  │  │  Facing)     │  │    │  │  (Gateway)    │  │                    │   │
 │  │  │  └──────────────┘  │    │  └───────┬───────┘  │                    │   │
 │  │  │                    │    │          │          │                    │   │
 │  │  └────────────────────┘    │  ┌───────▼───────┐  │                    │   │
-│  │                            │  │  ElastiCache  │  │                    │   │
-│  │                            │  │    (Redis)    │  │                    │   │
+│  │                            │  │  ElastiCache  │  │  ◄── OPTIONAL     │   │
+│  │                            │  │ (Redis/Valkey)│  │      (Caching)    │   │
 │  │                            │  └───────┬───────┘  │                    │   │
 │  │                            │          │          │                    │   │
 │  │                            │  ┌───────▼───────┐  │                    │   │
-│  │                            │  │   RDS/Aurora  │  │                    │   │
-│  │                            │  │  (PostgreSQL) │  │                    │   │
+│  │                            │  │  RDS/Aurora   │  │  ◄── OPTIONAL     │   │
+│  │                            │  │  (PostgreSQL) │  │      (Persistence)│   │
 │  │                            │  └───────────────┘  │                    │   │
 │  │                            └─────────────────────┘                    │   │
 │  └──────────────────────────────────────────────────────────────────────┘   │
@@ -33,13 +80,24 @@ This guide covers deploying LiteLLM + LLMRouter to AWS using various compute opt
 │  ┌──────────────────────────────────┼──────────────────────────────────┐    │
 │  │                    AWS Services  │                                   │    │
 │  │  ┌─────────────┐  ┌─────────────▼──┐  ┌─────────────┐               │    │
-│  │  │   Amazon    │  │    Amazon      │  │  CloudWatch │               │    │
-│  │  │   Bedrock   │  │      S3        │  │   X-Ray     │               │    │
-│  │  │  (LLMs)     │  │ (Models/Config)│  │  (Traces)   │               │    │
+│  │  │   Amazon    │  │    Amazon      │  │ CloudWatch  │               │    │
+│  │  │   Bedrock   │  │      S3        │  │   X-Ray     │  ◄── OPTIONAL │    │
+│  │  │  (LLMs)     │  │ (Config/Models)│  │ (Observ.)   │               │    │
 │  │  └─────────────┘  └────────────────┘  └─────────────┘               │    │
 │  └──────────────────────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
+
+## Local Testing vs AWS Production Mapping
+
+| Local (docker-compose) | AWS Production | Purpose |
+|------------------------|----------------|---------|
+| `litellm-gateway` container | ECS Fargate / EKS / App Runner | LLM Gateway (mandatory) |
+| `postgres` container | Amazon RDS / Aurora PostgreSQL | API keys, spend tracking |
+| `redis` container | ElastiCache Redis / Valkey / MemoryDB | Caching, rate limiting |
+| `minio` container | Amazon S3 | Config files, ML models |
+| `jaeger` container | AWS X-Ray + CloudWatch | Distributed tracing |
+| `mlflow` container | SageMaker / Self-hosted on ECS | ML experiment tracking |
 
 ## Deployment Options
 
@@ -312,9 +370,11 @@ service:
 
 ---
 
-## Database Configuration
+## Database Configuration (Optional)
 
-### RDS PostgreSQL
+> **Note**: Database is optional. Without it, API key management, spend tracking, and team features are disabled. The gateway still functions for basic routing.
+
+### Option A: Amazon RDS PostgreSQL (Recommended for most use cases)
 
 ```bash
 # Create RDS instance
@@ -322,25 +382,185 @@ aws rds create-db-instance \
   --db-instance-identifier litellm-db \
   --db-instance-class db.t3.medium \
   --engine postgres \
+  --engine-version 15 \
   --master-username litellm \
   --master-user-password <secure-password> \
   --allocated-storage 20 \
+  --storage-encrypted \
   --vpc-security-group-ids sg-xxx \
   --db-subnet-group-name my-subnet-group
 ```
 
-### ElastiCache Redis
+### Option B: Aurora PostgreSQL Serverless v2 (Best for variable workloads)
 
 ```bash
-# Create ElastiCache cluster
+# Create Aurora Serverless v2 cluster
+aws rds create-db-cluster \
+  --db-cluster-identifier litellm-aurora \
+  --engine aurora-postgresql \
+  --engine-version 15.4 \
+  --master-username litellm \
+  --master-user-password <secure-password> \
+  --serverless-v2-scaling-configuration MinCapacity=0.5,MaxCapacity=8 \
+  --storage-encrypted \
+  --vpc-security-group-ids sg-xxx \
+  --db-subnet-group-name my-subnet-group
+```
+
+### Database Connection String
+
+```bash
+# Store in Secrets Manager
+aws secretsmanager create-secret \
+  --name litellm/database-url \
+  --secret-string "postgresql://litellm:<password>@<rds-endpoint>:5432/litellm"
+```
+
+---
+
+## Caching Configuration (Optional)
+
+> **Note**: Redis/Valkey caching is optional. Without it, response caching and distributed rate limiting are disabled.
+
+### Option A: ElastiCache Redis
+
+```bash
+# Create ElastiCache Redis cluster
 aws elasticache create-cache-cluster \
   --cache-cluster-id litellm-redis \
   --cache-node-type cache.t3.medium \
   --engine redis \
+  --engine-version 7.1 \
   --num-cache-nodes 1 \
   --security-group-ids sg-xxx \
   --cache-subnet-group-name my-cache-subnet
 ```
+
+### Option B: ElastiCache Valkey (Open-source Redis alternative)
+
+```bash
+# Create ElastiCache Valkey cluster
+aws elasticache create-cache-cluster \
+  --cache-cluster-id litellm-valkey \
+  --cache-node-type cache.t3.medium \
+  --engine valkey \
+  --num-cache-nodes 1 \
+  --security-group-ids sg-xxx \
+  --cache-subnet-group-name my-cache-subnet
+```
+
+### Option C: Amazon MemoryDB (Redis-compatible with durability)
+
+```bash
+# Create MemoryDB cluster (for persistence needs)
+aws memorydb create-cluster \
+  --cluster-name litellm-memorydb \
+  --node-type db.t4g.medium \
+  --num-shards 1 \
+  --security-group-ids sg-xxx \
+  --subnet-group-name my-memorydb-subnet
+```
+
+### Gateway Environment Variables for Caching
+
+```yaml
+environment:
+  - REDIS_HOST=<elasticache-endpoint>
+  - REDIS_PORT=6379
+  # For TLS-enabled clusters:
+  - REDIS_SSL=true
+```
+
+---
+
+## Object Storage Configuration (Optional)
+
+> **Note**: S3 is optional. Use it for storing config files, ML models, and enabling hot-reload.
+
+### S3 Bucket for Config and Models
+
+```bash
+# Create S3 bucket
+aws s3 mb s3://litellm-config-${AWS_ACCOUNT_ID}
+
+# Upload config
+aws s3 cp config/config.yaml s3://litellm-config-${AWS_ACCOUNT_ID}/config/
+
+# Upload LLMRouter models (if using ML-based routing)
+aws s3 cp models/ s3://litellm-config-${AWS_ACCOUNT_ID}/models/ --recursive
+```
+
+### Gateway Environment Variables for S3
+
+```yaml
+environment:
+  - CONFIG_S3_BUCKET=litellm-config-123456789
+  - CONFIG_S3_KEY=config/config.yaml
+  - LLMROUTER_MODEL_S3_BUCKET=litellm-config-123456789
+  - LLMROUTER_MODEL_S3_KEY=models/
+  - CONFIG_HOT_RELOAD=true  # Enable hot-reload from S3
+```
+
+---
+
+## Observability Configuration (Optional)
+
+> **Note**: Observability is optional but recommended for production. Multiple AWS-native options available.
+
+### Option A: AWS X-Ray with ADOT Collector (Recommended)
+
+Use AWS Distro for OpenTelemetry (ADOT) as a sidecar to send traces to X-Ray:
+
+```yaml
+# Gateway environment
+environment:
+  - OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
+  - OTEL_SERVICE_NAME=litellm-gateway
+  - OTEL_TRACES_EXPORTER=otlp
+```
+
+### Option B: CloudWatch Logs + Container Insights
+
+For simpler observability without distributed tracing:
+
+```json
+{
+  "logConfiguration": {
+    "logDriver": "awslogs",
+    "options": {
+      "awslogs-group": "/ecs/litellm-gateway",
+      "awslogs-region": "us-east-1",
+      "awslogs-stream-prefix": "gateway"
+    }
+  }
+}
+```
+
+Enable Container Insights for metrics:
+
+```bash
+aws ecs update-cluster-settings \
+  --cluster litellm-cluster \
+  --settings name=containerInsights,value=enabled
+```
+
+### Option C: Amazon Managed Grafana + Prometheus
+
+For teams using Grafana:
+
+1. Create Amazon Managed Grafana workspace
+2. Deploy Prometheus as a sidecar or use Amazon Managed Prometheus
+3. Configure LiteLLM to expose `/metrics` endpoint
+4. Set up dashboards in Grafana
+
+### Observability Comparison
+
+| Option | Traces | Metrics | Logs | Cost | Complexity |
+|--------|--------|---------|------|------|------------|
+| X-Ray + ADOT | ✅ | ✅ | ❌ | Low | Medium |
+| CloudWatch + Container Insights | ❌ | ✅ | ✅ | Low | Low |
+| Managed Grafana + Prometheus | ✅ | ✅ | ✅ | Medium | High |
+| Self-hosted Jaeger | ✅ | ❌ | ❌ | Compute only | High |
 
 ---
 

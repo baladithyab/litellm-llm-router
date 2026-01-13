@@ -1,10 +1,30 @@
+# =============================================================================
 # LiteLLM + LLMRouter - Local Testing Setup
-# Tests: A2A Gateway, MCP Gateway, Routing Strategies, Hot Reload, Config Sync
-# Services: PostgreSQL, Redis, Jaeger, MLflow, MinIO, MCP Servers
+# =============================================================================
+# This docker-compose file simulates a production AWS environment locally.
+#
+# MANDATORY COMPONENT:
+#   - litellm-gateway: The core LLM proxy/gateway (required)
+#
+# OPTIONAL COMPONENTS (simulating AWS services):
+#   - postgres:  Simulates Amazon RDS / Aurora PostgreSQL
+#   - redis:     Simulates ElastiCache Redis / Valkey / MemoryDB
+#   - minio:     Simulates Amazon S3
+#   - jaeger:    Simulates AWS X-Ray / CloudWatch (OTEL tracing)
+#   - mlflow:    Simulates SageMaker / self-hosted experiment tracking
+#
+# For minimal testing, you can run just the gateway:
+#   docker compose -f docker-compose.local-test.yml up litellm-gateway
+#
+# For full testing with all services:
+#   docker compose -f docker-compose.local-test.yml up
+# =============================================================================
 
 services:
   # ==========================================================================
-  # PostgreSQL - For persistent storage
+  # OPTIONAL: PostgreSQL - Simulates Amazon RDS / Aurora PostgreSQL
+  # AWS Alternative: Amazon RDS, Aurora PostgreSQL, Aurora Serverless v2
+  # Purpose: API key management, spend tracking, team management
   # ==========================================================================
   postgres:
     image: postgres:16-alpine
@@ -24,7 +44,9 @@ services:
       - litellm-test-network
 
   # ==========================================================================
-  # Redis - For caching and distributed state
+  # OPTIONAL: Redis - Simulates ElastiCache Redis / Valkey / MemoryDB
+  # AWS Alternative: ElastiCache Redis, ElastiCache Valkey, MemoryDB
+  # Purpose: Response caching, rate limiting, distributed state
   # ==========================================================================
   redis:
     image: redis:7-alpine
@@ -41,7 +63,9 @@ services:
       - litellm-test-network
 
   # ==========================================================================
-  # Jaeger - Distributed Tracing
+  # OPTIONAL: Jaeger - Simulates AWS X-Ray / CloudWatch Tracing
+  # AWS Alternative: AWS X-Ray, CloudWatch Container Insights, Managed Grafana
+  # Purpose: Distributed tracing, request tracking, performance analysis
   # ==========================================================================
   jaeger:
     image: jaegertracing/all-in-one:1.54
@@ -56,7 +80,9 @@ services:
       - litellm-test-network
 
   # ==========================================================================
-  # MinIO - S3-compatible object storage
+  # OPTIONAL: MinIO - Simulates Amazon S3
+  # AWS Alternative: Amazon S3
+  # Purpose: Configuration files, ML models, hot-reload support
   # ==========================================================================
   minio:
     image: minio/minio:latest
@@ -98,7 +124,9 @@ services:
       - litellm-test-network
 
   # ==========================================================================
-  # MLflow - ML Experiment Tracking (using SQLite for simplicity)
+  # OPTIONAL: MLflow - Simulates SageMaker / ML Experiment Tracking
+  # AWS Alternative: SageMaker Experiments, self-hosted on ECS, S3 + DynamoDB
+  # Purpose: LLMRouter model training, experiment tracking, model versioning
   # ==========================================================================
   mlflow:
     image: ghcr.io/mlflow/mlflow:v2.16.0
@@ -130,7 +158,9 @@ services:
       - litellm-test-network
 
   # ==========================================================================
-  # LiteLLM + LLMRouter Gateway - Full Feature Test
+  # MANDATORY: LiteLLM + LLMRouter Gateway - Core LLM Proxy
+  # AWS Deployment: ECS Fargate, EKS, App Runner, Lambda
+  # Purpose: LLM request routing, API proxy, load balancing
   # ==========================================================================
   litellm-gateway:
     build:
