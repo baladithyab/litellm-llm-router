@@ -129,7 +129,60 @@ This implementation plan focuses on validating the existing LiteLLM + LLMRouter 
 
 - [ ] 9.1 Write property test for A2A agent registration
   - **Property 11: A2A Agent Registration and Discovery**
-  - **Validates: Requirements 7.2, 7.3, 7.4**
+  - **Validates: Requirements 7.2, 7.6, 7.13**
+
+- [ ] 9.2 Implement A2A Agent Invocation Endpoint
+  - Add POST `/a2a/{agent_id}` endpoint for JSON-RPC 2.0 message handling
+  - Implement `message/send` method to forward messages to agent backend
+  - Return JSON-RPC 2.0 compliant responses
+  - _Requirements: 7.8, 7.9_
+
+- [ ] 9.3 Write property test for A2A agent invocation
+  - **Property 23: A2A Agent Invocation**
+  - **Validates: Requirements 7.8, 7.9**
+
+- [ ] 9.4 Implement A2A Streaming Support
+  - Add `message/stream` method support to `/a2a/{agent_id}` endpoint
+  - Implement Server-Sent Events (SSE) streaming for agent responses
+  - Handle streaming errors and connection management
+  - _Requirements: 7.10_
+
+- [ ] 9.5 Write property test for A2A streaming
+  - **Property 24: A2A Streaming Response**
+  - **Validates: Requirements 7.10**
+
+- [ ] 9.6 Implement A2A Database Persistence
+  - Create `a2a_agents` table schema in PostgreSQL
+  - Implement DB persistence for agent registration (POST `/v1/agents`)
+  - Implement DB retrieval for agent listing (GET `/v1/agents`)
+  - Add migration scripts for A2A tables
+  - _Requirements: 7.7_
+
+- [ ] 9.7 Write property test for A2A database persistence
+  - **Property 25: A2A Database Persistence**
+  - **Validates: Requirements 7.7**
+
+- [ ] 9.8 Implement A2A Agent Updates
+  - Add PUT `/v1/agents/{agent_id}` endpoint for full agent updates
+  - Add PATCH `/v1/agents/{agent_id}` endpoint for partial updates
+  - Implement permission checks for update operations
+  - _Requirements: 7.11, 7.12_
+
+- [ ] 9.9 Write property test for A2A agent updates
+  - **Property 26: A2A Agent Updates**
+  - **Validates: Requirements 7.11, 7.12**
+
+- [ ] 9.10 Implement A2A Permission Filtering
+  - Add user_id and team_id filtering to agent listing
+  - Implement is_public flag support for public agents
+  - Add `/v1/agents/{agent_id}/make_public` endpoint
+  - _Requirements: 7.13_
+
+- [ ] 9.11 Implement A2A Analytics Endpoint
+  - Add `/agent/daily/activity` endpoint for usage analytics
+  - Track agent invocation counts and latency
+  - Support date range filtering
+  - _Requirements: 7.14_
 
 - [ ] 10. Validate MCP Gateway
   - Test MCP server registration via configuration
@@ -146,6 +199,69 @@ This implementation plan focuses on validating the existing LiteLLM + LLMRouter 
 - [ ] 10.2 Write property test for OpenAPI to MCP conversion
   - **Property 13: OpenAPI to MCP Conversion**
   - **Validates: Requirements 8.6**
+
+- [ ] 10.3 Implement MCP Tool Invocation Endpoint
+  - Add POST `/mcp/tools/call` endpoint for direct tool invocation
+  - Add GET `/mcp/tools/list` endpoint for listing available tools
+  - Implement tool argument validation against input schema
+  - Handle tool execution errors gracefully
+  - _Requirements: 8.8, 8.9_
+
+- [ ] 10.4 Write property test for MCP tool invocation
+  - **Property 27: MCP Tool Invocation**
+  - **Validates: Requirements 8.8**
+
+- [ ] 10.5 Implement MCP Database Persistence
+  - Create `mcp_servers`, `mcp_tools`, `mcp_resources` table schemas
+  - Implement DB persistence for server registration (POST `/v1/mcp/server`)
+  - Implement DB retrieval for server listing (GET `/v1/mcp/server`)
+  - Add migration scripts for MCP tables
+  - _Requirements: 8.7_
+
+- [ ] 10.6 Write property test for MCP database persistence
+  - **Property 28: MCP Database Persistence**
+  - **Validates: Requirements 8.7**
+
+- [ ] 10.7 Implement MCP OAuth Support
+  - Add POST `/v1/mcp/server/oauth/session` for temporary OAuth sessions
+  - Add GET `/v1/mcp/server/oauth/{server_id}/authorize` for OAuth authorization
+  - Add POST `/v1/mcp/server/oauth/{server_id}/token` for token exchange
+  - Add GET `/.well-known/oauth-authorization-server` for OAuth discovery
+  - _Requirements: 8.10, 8.11_
+
+- [ ] 10.8 Write property test for MCP OAuth flow
+  - **Property 29: MCP OAuth Flow**
+  - **Validates: Requirements 8.10, 8.11**
+
+- [ ] 10.9 Implement MCP Server Health Checks
+  - Add GET `/v1/mcp/server/health` endpoint
+  - Implement connectivity checks for each registered server
+  - Return health status with latency metrics
+  - _Requirements: 8.13_
+
+- [ ] 10.10 Write property test for MCP health checks
+  - **Property 30: MCP Server Health Check**
+  - **Validates: Requirements 8.13**
+
+- [ ] 10.11 Implement MCP Registry Endpoint
+  - Add GET `/v1/mcp/registry.json` endpoint for MCP discovery
+  - Generate registry document listing all servers and capabilities
+  - Support filtering by access groups
+  - _Requirements: 8.12_
+
+- [ ] 10.12 Write property test for MCP registry
+  - **Property 31: MCP Registry Discovery**
+  - **Validates: Requirements 8.12**
+
+- [ ] 10.13 Implement MCP Server Updates
+  - Add PUT `/v1/mcp/server/{server_id}` endpoint for full server updates
+  - Implement tool and resource refresh on server update
+  - _Requirements: 8.14_
+
+- [ ] 10.14 Implement MCP Access Groups
+  - Add GET `/v1/mcp/access_groups` endpoint for listing access groups
+  - Implement access group filtering for server visibility
+  - _Requirements: 8.15_
 
 - [ ] 11. Checkpoint - Ensure all gateway extension tests pass
   - Ensure all tests pass, ask the user if questions arise.
@@ -248,3 +364,7 @@ This implementation plan focuses on validating the existing LiteLLM + LLMRouter 
 - Integration tests should use Docker Compose to test with real Redis, PostgreSQL, S3 (LocalStack), and OpenTelemetry Collector
 - OpenTelemetry integration provides unified observability for traces, logs, and metrics
 - All logs should include trace correlation IDs (trace_id, span_id) for distributed debugging
+- **A2A Full Parity**: Tasks 9.2-9.11 implement full A2A protocol support including agent invocation, streaming, DB persistence, and analytics
+- **MCP Full Parity**: Tasks 10.3-10.14 implement full MCP protocol support including tool invocation, OAuth, health checks, and registry
+- Database migrations should be created for new A2A and MCP tables
+- URL patterns should align with LiteLLM defaults (`/v1/agents`, `/v1/mcp/server`) for ecosystem compatibility

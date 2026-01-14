@@ -8,8 +8,8 @@ This document analyzes the API parity between our custom LiteLLM + LLMRouter Gat
 |----------|-----------------|-------------------|---------------|
 | Core LLM Endpoints | ✅ Full | ✅ Inherited | ✅ Complete |
 | Health Endpoints | ✅ Full | ✅ Inherited | ✅ Complete |
-| A2A Gateway | ✅ Full (beta) | ⚠️ Simplified | ⚠️ Partial |
-| MCP Gateway | ✅ Full | ⚠️ Simplified | ⚠️ Partial |
+| A2A Gateway | ✅ Full (beta) | ⚠️ Simplified | 🔄 Full Parity Planned |
+| MCP Gateway | ✅ Full | ⚠️ Simplified | 🔄 Full Parity Planned |
 | Hot Reload | ❌ Limited | ✅ Extended | ✅ Enhanced |
 | Management Endpoints | ✅ Full | ✅ Inherited | ✅ Complete |
 
@@ -111,15 +111,15 @@ LiteLLM has a comprehensive A2A implementation with database persistence:
 
 ### Gap Analysis - A2A
 
-| Feature | LiteLLM | Ours | Priority |
-|---------|---------|------|----------|
-| Database persistence | ✅ | ❌ In-memory only | High |
-| Agent invocation (JSON-RPC) | ✅ | ❌ Missing | High |
-| PUT/PATCH updates | ✅ | ❌ Missing | Medium |
-| Permission filtering | ✅ | ❌ Missing | Medium |
-| Make public endpoints | ✅ | ❌ Missing | Low |
-| Analytics | ✅ | ❌ Missing | Low |
-| Streaming support | ✅ | ❌ Missing | Medium |
+| Feature | LiteLLM | Ours | Priority | Status |
+|---------|---------|------|----------|--------|
+| Database persistence | ✅ | ❌ In-memory only | High | 🔄 Planned (Task 9.6) |
+| Agent invocation (JSON-RPC) | ✅ | ❌ Missing | High | 🔄 Planned (Task 9.2) |
+| PUT/PATCH updates | ✅ | ❌ Missing | Medium | 🔄 Planned (Task 9.8) |
+| Permission filtering | ✅ | ❌ Missing | Medium | 🔄 Planned (Task 9.10) |
+| Make public endpoints | ✅ | ❌ Missing | Low | 🔄 Planned (Task 9.10) |
+| Analytics | ✅ | ❌ Missing | Low | 🔄 Planned (Task 9.11) |
+| Streaming support | ✅ | ❌ Missing | Medium | 🔄 Planned (Task 9.4) |
 
 ---
 
@@ -160,15 +160,15 @@ LiteLLM has extensive MCP support with OAuth, registry, and management:
 
 ### Gap Analysis - MCP
 
-| Feature | LiteLLM | Ours | Priority |
-|---------|---------|------|----------|
-| Database persistence | ✅ | ❌ In-memory only | High |
-| Tool invocation | ✅ | ❌ Missing | High |
-| OAuth support | ✅ | ❌ Missing | Medium |
-| Registry endpoint | ✅ | ❌ Missing | Medium |
-| Health checks | ✅ | ❌ Missing | Medium |
-| Access groups | ✅ | ❌ Missing | Low |
-| PUT updates | ✅ | ❌ Missing | Low |
+| Feature | LiteLLM | Ours | Priority | Status |
+|---------|---------|------|----------|--------|
+| Database persistence | ✅ | ❌ In-memory only | High | 🔄 Planned (Task 10.5) |
+| Tool invocation | ✅ | ❌ Missing | High | 🔄 Planned (Task 10.3) |
+| OAuth support | ✅ | ❌ Missing | Medium | 🔄 Planned (Task 10.7) |
+| Registry endpoint | ✅ | ❌ Missing | Medium | 🔄 Planned (Task 10.11) |
+| Health checks | ✅ | ❌ Missing | Medium | 🔄 Planned (Task 10.9) |
+| Access groups | ✅ | ❌ Missing | Low | 🔄 Planned (Task 10.14) |
+| PUT updates | ✅ | ❌ Missing | Low | 🔄 Planned (Task 10.13) |
 
 ---
 
@@ -276,24 +276,31 @@ These are fully inherited from LiteLLM:
 
 ## 8. Recommendations
 
-### High Priority
+### High Priority (Planned for Implementation)
 
-1. **A2A Agent Invocation**: Add `/a2a/{agent_id}` POST endpoint for JSON-RPC 2.0 message handling
-2. **MCP Tool Invocation**: Add `/mcp/tools/call` POST endpoint for tool execution
-3. **Database Persistence**: Consider adding optional DB persistence for A2A/MCP registrations
+1. **A2A Agent Invocation**: ✅ Planned - Add `/a2a/{agent_id}` POST endpoint for JSON-RPC 2.0 message handling
+2. **MCP Tool Invocation**: ✅ Planned - Add `/mcp/tools/call` POST endpoint for tool execution
+3. **Database Persistence**: ✅ Planned - Add PostgreSQL persistence for A2A/MCP registrations
 
-### Medium Priority
+### Medium Priority (Planned for Implementation)
 
-4. **A2A Streaming**: Support `message/stream` method for streaming responses
-5. **MCP OAuth**: Add OAuth flow support for MCP server authentication
-6. **Health Checks**: Add health check endpoints for MCP servers
-7. **PUT/PATCH Updates**: Add update endpoints for A2A agents and MCP servers
+4. **A2A Streaming**: ✅ Planned - Support `message/stream` method for streaming responses
+5. **MCP OAuth**: ✅ Planned - Add OAuth flow support for MCP server authentication
+6. **Health Checks**: ✅ Planned - Add health check endpoints for MCP servers
+7. **PUT/PATCH Updates**: ✅ Planned - Add update endpoints for A2A agents and MCP servers
 
-### Low Priority
+### Low Priority (Planned for Implementation)
 
-8. **MCP Registry**: Add `/mcp/registry.json` for MCP discovery
-9. **Access Groups**: Add MCP access group management
-10. **Analytics**: Add agent activity analytics
+8. **MCP Registry**: ✅ Planned - Add `/v1/mcp/registry.json` for MCP discovery
+9. **Access Groups**: ✅ Planned - Add MCP access group management
+10. **Analytics**: ✅ Planned - Add agent activity analytics
+
+### Implementation Status
+
+All gaps identified above have been documented in the spec files and are planned for implementation:
+- Requirements: `.kiro/specs/production-ai-gateway/requirements.md` (Requirements 7.7-7.14, 8.7-8.15)
+- Design: `.kiro/specs/production-ai-gateway/design.md` (Properties 23-31)
+- Tasks: `.kiro/specs/production-ai-gateway/tasks.md` (Tasks 9.2-9.11, 10.3-10.14)
 
 ---
 

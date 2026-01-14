@@ -105,12 +105,20 @@ This document specifies the requirements for a production-ready AI Gateway that 
 
 #### Acceptance Criteria
 
-1. WHEN A2A_GATEWAY_ENABLED is true, THE Gateway SHALL expose A2A protocol endpoints at `/a2a/{agent_name}`
-2. THE Gateway SHALL support A2A agent registration via configuration or API
+1. WHEN A2A_GATEWAY_ENABLED is true, THE Gateway SHALL expose A2A protocol endpoints at `/a2a/{agent_id}`
+2. THE Gateway SHALL support A2A agent registration via configuration or API at `/v1/agents` endpoint
 3. WHEN an A2A SendMessageRequest is received, THE Gateway SHALL forward it to the configured agent backend
 4. THE Gateway SHALL return A2A-compliant responses including agent cards, message responses, and streaming updates
 5. THE Gateway SHALL support A2A authentication via virtual keys in the Authorization header
-6. THE Gateway SHALL expose `/a2a/{agent_name}/card` endpoint returning the agent's capability card
+6. THE Gateway SHALL expose `/a2a/{agent_id}/.well-known/agent-card.json` endpoint returning the agent's capability card in A2A protocol format
+7. WHEN database_url is configured, THE Gateway SHALL persist A2A agent registrations to PostgreSQL
+8. WHEN a POST request is made to `/a2a/{agent_id}`, THE Gateway SHALL process JSON-RPC 2.0 messages and invoke the agent
+9. WHEN the JSON-RPC method is `message/send`, THE Gateway SHALL forward the message to the agent and return the response
+10. WHEN the JSON-RPC method is `message/stream`, THE Gateway SHALL forward the message and stream the response using Server-Sent Events
+11. THE Gateway SHALL support PUT requests to `/v1/agents/{agent_id}` for full agent updates
+12. THE Gateway SHALL support PATCH requests to `/v1/agents/{agent_id}` for partial agent updates
+13. WHEN listing agents via GET `/v1/agents`, THE Gateway SHALL filter results based on user permissions and team membership
+14. THE Gateway SHALL expose `/agent/daily/activity` endpoint for agent usage analytics when database_url is configured
 
 ### Requirement 8: MCP Server Gateway
 
@@ -118,12 +126,21 @@ This document specifies the requirements for a production-ready AI Gateway that 
 
 #### Acceptance Criteria
 
-1. WHEN MCP_GATEWAY_ENABLED is true, THE Gateway SHALL expose MCP protocol endpoints at `/mcp/{server_name}`
-2. THE Gateway SHALL support MCP server registration via mcp_servers configuration section
+1. WHEN MCP_GATEWAY_ENABLED is true, THE Gateway SHALL expose MCP protocol endpoints at `/v1/mcp/server` and `/mcp/{server_name}`
+2. THE Gateway SHALL support MCP server registration via mcp_servers configuration section or POST to `/v1/mcp/server`
 3. WHEN mcp_servers are configured, THE Gateway SHALL load tool definitions and make them available to LLMs
 4. WHEN a `/chat/completions` request includes `tools` with type `mcp`, THE Gateway SHALL invoke the specified MCP server
 5. THE Gateway SHALL support MCP transports including `streamable_http`, `sse`, and `stdio`
 6. THE Gateway SHALL support OpenAPI-to-MCP conversion for REST APIs via spec_path configuration
+7. WHEN database_url is configured, THE Gateway SHALL persist MCP server registrations to PostgreSQL
+8. THE Gateway SHALL expose `/mcp/tools/call` POST endpoint for invoking MCP tools directly
+9. THE Gateway SHALL expose `/mcp/tools/list` GET endpoint for listing available tools
+10. THE Gateway SHALL support OAuth 2.0 authentication for MCP servers via `/v1/mcp/server/oauth/{server_id}/authorize` and `/v1/mcp/server/oauth/{server_id}/token` endpoints
+11. THE Gateway SHALL expose `/.well-known/oauth-authorization-server` endpoint for OAuth discovery
+12. THE Gateway SHALL expose `/v1/mcp/registry.json` endpoint for MCP server discovery
+13. THE Gateway SHALL expose `/v1/mcp/server/health` GET endpoint for checking MCP server health status
+14. THE Gateway SHALL support PUT requests to `/v1/mcp/server/{server_id}` for full server updates
+15. THE Gateway SHALL support MCP access groups via `/v1/mcp/access_groups` endpoint for permission management
 
 ### Requirement 9: Multi-Architecture Docker Support
 

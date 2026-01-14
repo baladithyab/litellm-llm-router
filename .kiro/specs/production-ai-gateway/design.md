@@ -188,7 +188,7 @@ router_settings:
 
 ### 3. A2A Gateway
 
-**Responsibility**: Agent-to-Agent protocol support for agent communication.
+**Responsibility**: Agent-to-Agent protocol support for agent communication with full LiteLLM parity.
 
 **Class**: `A2AGateway`
 
@@ -196,8 +196,13 @@ router_settings:
 - `register_agent(agent: A2AAgent)` - Register a new A2A agent
 - `unregister_agent(agent_id: str)` - Remove an agent
 - `get_agent(agent_id: str)` - Retrieve agent by ID
-- `discover_agents(capability: str)` - Find agents by capability
+- `update_agent(agent_id: str, agent: A2AAgent)` - Full update of agent
+- `patch_agent(agent_id: str, updates: dict)` - Partial update of agent
+- `discover_agents(capability: str, user_id: str, team_id: str)` - Find agents by capability with permission filtering
 - `get_agent_card(agent_id: str)` - Get A2A protocol agent card
+- `invoke_agent(agent_id: str, message: JSONRPCRequest)` - Invoke agent via JSON-RPC 2.0
+- `stream_agent_response(agent_id: str, message: JSONRPCRequest)` - Stream agent response via SSE
+- `get_daily_activity(agent_id: str, start_date: date, end_date: date)` - Get agent usage analytics
 
 **Data Model**:
 ```python
@@ -209,18 +214,67 @@ class A2AAgent:
     url: str
     capabilities: list[str]
     metadata: dict[str, Any]
+    team_id: str | None = None
+    user_id: str | None = None
+    is_public: bool = False
+    created_at: datetime = None
+    updated_at: datetime = None
+
+@dataclass
+class JSONRPCRequest:
+    jsonrpc: str = "2.0"
+    method: str  # "message/send" or "message/stream"
+    params: dict[str, Any]
+    id: str | int
+
+@dataclass
+class A2AMessage:
+    role: str  # "user" or "agent"
+    parts: list[A2AMessagePart]
+    
+@dataclass
+class A2AMessagePart:
+    type: str  # "text", "file", "data"
+    content: str | bytes
+    mime_type: str | None = None
 ```
 
 **API Endpoints**:
-- `GET /a2a/agents` - List all agents
-- `POST /a2a/agents` - Register new agent
-- `GET /a2a/agents/{agent_id}` - Get agent details
-- `GET /a2a/agents/{agent_id}/card` - Get agent card (A2A format)
-- `DELETE /a2a/agents/{agent_id}` - Unregister agent
+- `GET /v1/agents` - List all agents (with permission filtering)
+- `POST /v1/agents` - Register new agent (DB persistence)
+- `GET /v1/agents/{agent_id}` - Get agent details
+- `PUT /v1/agents/{agent_id}` - Full update agent
+- `PATCH /v1/agents/{agent_id}` - Partial update agent
+- `DELETE /v1/agents/{agent_id}` - Unregister agent
+- `POST /v1/agents/{agent_id}/make_public` - Make agent public
+- `POST /a2a/{agent_id}` - Invoke agent (JSON-RPC 2.0)
+- `GET /a2a/{agent_id}/.well-known/agent-card.json` - Get agent card
+- `GET /agent/daily/activity` - Agent analytics
+
+**Database Schema**:
+```sql
+CREATE TABLE a2a_agents (
+    agent_id UUID PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    description TEXT,
+    url VARCHAR(1024) NOT NULL,
+    capabilities JSONB DEFAULT '[]',
+    metadata JSONB DEFAULT '{}',
+    team_id VARCHAR(255),
+    user_id VARCHAR(255),
+    is_public BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX idx_a2a_agents_team ON a2a_agents(team_id);
+CREATE INDEX idx_a2a_agents_user ON a2a_agents(user_id);
+CREATE INDEX idx_a2a_agents_public ON a2a_agents(is_public);
+```
 
 ### 4. MCP Gateway
 
-**Responsibility**: Model Context Protocol support for tool and context integration.
+**Responsibility**: Model Context Protocol support for tool and context integration with full LiteLLM parity.
 
 **Class**: `MCPGateway`
 
@@ -228,8 +282,16 @@ class A2AAgent:
 - `register_server(server: MCPServer)` - Register a new MCP server
 - `unregister_server(server_id: str)` - Remove a server
 - `get_server(server_id: str)` - Retrieve server by ID
+- `update_server(server_id: str, server: MCPServer)` - Full update of server
 - `list_tools()` - List all available tools across servers
 - `list_resources()` - List all available resources across servers
+- `call_tool(server_id: str, tool_name: str, arguments: dict)` - Invoke an MCP tool
+- `get_registry()` - Get MCP registry for discovery
+- `check_server_health(server_id: str)` - Check MCP server health
+- `get_access_groups()` - List MCP access groups
+- `create_oauth_session(server_id: str)` - Create temporary OAuth session
+- `authorize_oauth(server_id: str, redirect_uri: str)` - OAuth authorization
+- `exchange_oauth_token(server_id: str, code: str)` - OAuth token exchange
 
 **Data Model**:
 ```python
@@ -239,19 +301,113 @@ class MCPServer:
     name: str
     url: str
     transport: MCPTransport  # streamable_http, sse, stdio
-    tools: list[str]
-    resources: list[str]
+    tools: list[MCPTool]
+    resources: list[MCPResource]
     auth_type: str  # none, api_key, bearer_token, oauth2
-    metadata: dict[str, Any]
+    oauth_config: MCPOAuthConfig | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+    team_id: str | None = None
+    created_at: datetime = None
+    updated_at: datetime = None
+
+@dataclass
+class MCPTool:
+    name: str
+    description: str
+    input_schema: dict[str, Any]
+    server_id: str
+
+@dataclass
+class MCPResource:
+    uri: str
+    name: str
+    description: str
+    mime_type: str
+    server_id: str
+
+@dataclass
+class MCPOAuthConfig:
+    client_id: str
+    client_secret: str
+    authorization_url: str
+    token_url: str
+    scopes: list[str]
+
+@dataclass
+class MCPToolCallRequest:
+    server_id: str
+    tool_name: str
+    arguments: dict[str, Any]
+
+@dataclass
+class MCPToolCallResponse:
+    content: list[dict[str, Any]]
+    is_error: bool = False
 ```
 
 **API Endpoints**:
-- `GET /mcp/servers` - List all servers
-- `POST /mcp/servers` - Register new server
-- `GET /mcp/servers/{server_id}` - Get server details
-- `DELETE /mcp/servers/{server_id}` - Unregister server
-- `GET /mcp/tools` - List all tools
-- `GET /mcp/resources` - List all resources
+- `GET /v1/mcp/server` - List all servers
+- `POST /v1/mcp/server` - Register new server (DB persistence)
+- `GET /v1/mcp/server/{server_id}` - Get server details
+- `PUT /v1/mcp/server/{server_id}` - Full update server
+- `DELETE /v1/mcp/server/{server_id}` - Unregister server
+- `GET /v1/mcp/server/health` - Health check all servers
+- `GET /v1/mcp/tools` - List all tools
+- `GET /mcp/tools/list` - List tools (REST API)
+- `POST /mcp/tools/call` - Call tool (REST API)
+- `GET /v1/mcp/registry.json` - MCP registry for discovery
+- `GET /v1/mcp/access_groups` - List access groups
+- `POST /v1/mcp/server/oauth/session` - Create OAuth session
+- `GET /v1/mcp/server/oauth/{server_id}/authorize` - OAuth authorize
+- `POST /v1/mcp/server/oauth/{server_id}/token` - OAuth token exchange
+- `GET /.well-known/oauth-authorization-server` - OAuth discovery
+
+**Database Schema**:
+```sql
+CREATE TABLE mcp_servers (
+    server_id UUID PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    url VARCHAR(1024) NOT NULL,
+    transport VARCHAR(50) NOT NULL,
+    auth_type VARCHAR(50) DEFAULT 'none',
+    oauth_config JSONB,
+    metadata JSONB DEFAULT '{}',
+    team_id VARCHAR(255),
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE TABLE mcp_tools (
+    tool_id UUID PRIMARY KEY,
+    server_id UUID REFERENCES mcp_servers(server_id) ON DELETE CASCADE,
+    name VARCHAR(255) NOT NULL,
+    description TEXT,
+    input_schema JSONB NOT NULL,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE TABLE mcp_resources (
+    resource_id UUID PRIMARY KEY,
+    server_id UUID REFERENCES mcp_servers(server_id) ON DELETE CASCADE,
+    uri VARCHAR(1024) NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    description TEXT,
+    mime_type VARCHAR(255),
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE TABLE mcp_access_groups (
+    group_id UUID PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    server_ids JSONB DEFAULT '[]',
+    team_id VARCHAR(255),
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX idx_mcp_servers_team ON mcp_servers(team_id);
+CREATE INDEX idx_mcp_tools_server ON mcp_tools(server_id);
+CREATE INDEX idx_mcp_resources_server ON mcp_resources(server_id);
+```
 
 ### 5. Hot Reload Manager
 
@@ -692,15 +848,69 @@ async def test_routing_with_cache():
 
 ### Property 11: A2A Agent Registration and Discovery
 
-*For any* A2A agent registered via configuration or API, the agent should be discoverable via the `/a2a/agents` endpoint and should be filterable by capability, and the agent card should be retrievable in A2A protocol format.
+*For any* A2A agent registered via configuration or API, the agent should be discoverable via the `/v1/agents` endpoint and should be filterable by capability and permission, and the agent card should be retrievable in A2A protocol format at `/.well-known/agent-card.json`.
 
-**Validates: Requirements 7.2, 7.3, 7.4**
+**Validates: Requirements 7.2, 7.6, 7.13**
+
+### Property 23: A2A Agent Invocation
+
+*For any* registered A2A agent, when a valid JSON-RPC 2.0 request with method `message/send` is POSTed to `/a2a/{agent_id}`, the Gateway should forward the message to the agent backend and return a valid JSON-RPC 2.0 response.
+
+**Validates: Requirements 7.8, 7.9**
+
+### Property 24: A2A Streaming Response
+
+*For any* registered A2A agent, when a valid JSON-RPC 2.0 request with method `message/stream` is POSTed to `/a2a/{agent_id}`, the Gateway should stream the response using Server-Sent Events with proper event formatting.
+
+**Validates: Requirements 7.10**
+
+### Property 25: A2A Database Persistence
+
+*For any* A2A agent registered when database_url is configured, the agent should be persisted to PostgreSQL and should survive Gateway restarts, and should be retrievable via the `/v1/agents` endpoint after restart.
+
+**Validates: Requirements 7.7**
+
+### Property 26: A2A Agent Updates
+
+*For any* registered A2A agent, PUT requests to `/v1/agents/{agent_id}` should fully replace the agent data, and PATCH requests should merge the provided fields with existing data while preserving unspecified fields.
+
+**Validates: Requirements 7.11, 7.12**
 
 ### Property 12: MCP Server Tool Loading
 
-*For any* MCP server configured in mcp_servers section, the Gateway should load all tool definitions from the server and make them available in the tools list, and requests with `tools` type `mcp` should invoke the correct server.
+*For any* MCP server configured in mcp_servers section or registered via API, the Gateway should load all tool definitions from the server and make them available in the tools list, and requests with `tools` type `mcp` should invoke the correct server.
 
 **Validates: Requirements 8.2, 8.3, 8.4**
+
+### Property 27: MCP Tool Invocation
+
+*For any* registered MCP server with available tools, when a POST request is made to `/mcp/tools/call` with a valid tool name and arguments, the Gateway should invoke the tool on the MCP server and return the tool's response.
+
+**Validates: Requirements 8.8**
+
+### Property 28: MCP Database Persistence
+
+*For any* MCP server registered when database_url is configured, the server and its tools should be persisted to PostgreSQL and should survive Gateway restarts, and should be retrievable via the `/v1/mcp/server` endpoint after restart.
+
+**Validates: Requirements 8.7**
+
+### Property 29: MCP OAuth Flow
+
+*For any* MCP server configured with OAuth authentication, the Gateway should support the complete OAuth 2.0 authorization code flow including session creation, authorization redirect, and token exchange.
+
+**Validates: Requirements 8.10, 8.11**
+
+### Property 30: MCP Server Health Check
+
+*For any* registered MCP server, when a GET request is made to `/v1/mcp/server/health`, the Gateway should check connectivity to the server and return the health status for each server.
+
+**Validates: Requirements 8.13**
+
+### Property 31: MCP Registry Discovery
+
+*For any* set of registered MCP servers, the `/v1/mcp/registry.json` endpoint should return a valid MCP registry document listing all servers and their capabilities for client discovery.
+
+**Validates: Requirements 8.12**
 
 ### Property 13: OpenAPI to MCP Conversion
 
