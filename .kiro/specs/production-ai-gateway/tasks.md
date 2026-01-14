@@ -24,14 +24,14 @@ This implementation plan focuses on validating the existing LiteLLM + LLMRouter 
   - **Property 3: Configuration Loading**
   - **Validates: Requirements 1.5**
 
-- [ ] 2. Validate LLMRouter Strategy Integration
+- [x] 2. Validate LLMRouter Strategy Integration
   - Verify all 18+ LLMRouter strategies are registered
   - Test routing strategy selection for each strategy type
   - Validate model and LLM candidate data loading
   - Test fallback to LiteLLM built-in strategies
   - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5, 2.6_
 
-- [ ] 2.1 Write property test for routing strategy selection
+- [x] 2.1 Write property test for routing strategy selection
   - **Property 4: Routing Strategy Selection**
   - **Validates: Requirements 2.2, 2.5, 2.6**
 
