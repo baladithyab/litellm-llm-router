@@ -37,8 +37,10 @@ def pytest_collection_modifyitems(config, items):
             "Run 'docker compose -f docker-compose.local-test.yml up -d' first."
         )
         for item in items:
-            # Skip tests in the integration folder
-            if "integration" in str(item.fspath):
+            # Skip tests in the integration folder only (not property tests)
+            # Check for /integration/ or \integration\ in the path
+            fspath_str = str(item.fspath)
+            if "/integration/" in fspath_str or "\\integration\\" in fspath_str:
                 item.add_marker(skip_integration)
 
     if in_ci and not gateway_available:
