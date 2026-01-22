@@ -2,15 +2,21 @@
 
 ## Overview
 
-This design document describes a production-ready AI Gateway that integrates LiteLLM (unified LLM API gateway) with LLMRouter (ML-based intelligent routing). The system provides a single OpenAI-compatible API endpoint that can route requests to 100+ LLM providers using 18+ intelligent routing strategies, with enterprise features including high availability, persistence, observability, hot reload, and support for modern protocols (A2A, MCP).
+This design document describes a production-ready AI Gateway that serves as an **enhancement layer on top of the LiteLLM Proxy**. The system integrates LiteLLM (unified LLM API gateway) with LLMRouter (ML-based intelligent routing) into a single, production-hardened container.
+
+** Enhancement Layer Philosophy:** We inherit all LiteLLM capabilities (authentication, caching, rate limiting, 100+ provider integrations, Skills endpoints) and extend them with ML routing, hot-reload, standardized HA protocols (HTTP/SSE/OTLP/Postgres/Redis), and agentic gateway support (MCP, A2A).
+
+The system provides a single OpenAI-compatible API endpoint that can route requests to 100+ LLM providers using 18+ intelligent routing strategies, with enterprise features including high availability, persistence, observability, hot reload, and support for modern protocols (A2A, MCP, Skills).
 
 ### Key Design Principles
 
-1. **Zero-Downtime Updates**: Hot reload for routing models and configurations without service restart
-2. **Horizontal Scalability**: Stateless design with Redis for distributed state and PostgreSQL for persistence
-3. **Observability First**: Comprehensive tracing, metrics, and logging for production debugging
-4. **Protocol Extensibility**: Support for emerging standards (A2A, MCP) alongside OpenAI compatibility
-5. **ML-Powered Intelligence**: Use trained routing models to optimize for cost, latency, and quality
+1. **Enhancement, Not Replacement**: Extend LiteLLM without forking core functionality
+2. **Zero-Downtime Updates**: Hot reload for routing models and configurations without service restart
+3. **Horizontal Scalability**: Stateless design with Redis for distributed state and PostgreSQL for persistence
+4. **Observability First**: Comprehensive tracing, metrics, and logging for production debugging
+5. **Protocol Extensibility**: Support for emerging standards (A2A, MCP, Skills) alongside OpenAI compatibility
+6. **ML-Powered Intelligence**: Use trained routing models to optimize for cost, latency, and quality
+7. **Moat-Mode Ready**: Support air-gapped and controlled-egress deployments with standardized protocols
 
 ## Architecture
 
@@ -143,7 +149,7 @@ model_list:
     litellm_params:
       model: openai/gpt-4
       api_key: os.environ/OPENAI_API_KEY
-      
+
 litellm_settings:
   cache: true
   cache_params:
@@ -231,7 +237,7 @@ class JSONRPCRequest:
 class A2AMessage:
     role: str  # "user" or "agent"
     parts: list[A2AMessagePart]
-    
+
 @dataclass
 class A2AMessagePart:
     type: str  # "text", "file", "data"
@@ -409,7 +415,53 @@ CREATE INDEX idx_mcp_tools_server ON mcp_tools(server_id);
 CREATE INDEX idx_mcp_resources_server ON mcp_resources(server_id);
 ```
 
-### 5. Hot Reload Manager
+### 5. Skills Gateway (Anthropic Skills)
+
+**Responsibility**: Expose Anthropic's "Skills" (Computer Use, Bash, Text Editor) endpoints with operational enhancements for observability and database backing.
+
+**Implementation**: Direct passthrough to LiteLLM's native `/v1/skills` endpoints with added instrumentation.
+
+**Key Design Decisions**:
+- **No Custom Implementation**: Skills endpoints are inherited from LiteLLM without modification
+- **Observability Layer**: Emit OpenTelemetry spans for Skills invocations
+- **Database Backing**: Use LiteLLM's PostgreSQL persistence for skill registrations (when `database_url` configured)
+- **Multi-Account Routing**: Support routing to different Anthropic accounts via `model_list` configuration
+
+**API Endpoints** (LiteLLM native):
+- `POST /v1/skills` - Create/invoke skill
+- `GET /v1/skills` - List available skills
+- `GET /v1/skills/{id}` - Get skill details
+- `DELETE /v1/skills/{id}` - Remove skill
+
+**Configuration**:
+```yaml
+model_list:
+  - model_name: claude-3-5-sonnet
+    litellm_params:
+      model: anthropic/claude-3-5-sonnet-20241022
+      api_key: os.environ/ANTHROPIC_API_KEY
+```
+
+**Relationship to MCP**:
+- **Skills**: Anthropic-specific agentic capabilities (Computer Use, precursor to MCP)
+- **MCP**: Open standard for connecting LLMs to tools/data (broader ecosystem)
+- **Gateway supports both** simultaneously without conflict
+
+**Observability**:
+```python
+# Pseudocode: Emit span for Skills invocation
+with tracer.start_as_current_span("skills.invoke") as span:
+    span.set_attribute("skill.id", skill_id)
+    span.set_attribute("skill.type", "computer_use")
+    # ... invoke LiteLLM endpoint
+    span.set_attribute("skill.duration_ms", duration)
+```
+
+**Moat-Mode Support**:
+- Skills work in air-gapped environments if Anthropic endpoints are reachable via VPC-private links
+- Database-backed persistence ensures skills survive container restarts
+
+### 6. Hot Reload Manager
 
 **Responsibility**: Manage hot reload operations for routing models and configurations.
 
@@ -503,6 +555,191 @@ litellm_settings:
 3. Start config sync (if enabled)
 4. Build litellm command with arguments
 5. Execute litellm proxy via `os.execvp()`
+
+### 9. MLOps Loop (OTEL Traces → Training → Hot Reload)
+
+**Responsibility**: Enable continuous improvement of routing models based on production traffic.
+
+**MLOps Pipeline Flow**:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     Production Gateway                          │
+│  ┌──────────────────────────────────────────────────────────┐   │
+│  │  Request → Route → LLM → Response                        │   │
+│  │  (Emit OTLP spans with routing_decision, model_selected) │   │
+│  └────────────────────────┬─────────────────────────────────┘   │
+└───────────────────────────┼─────────────────────────────────────┘
+                            │ OTLP/gRPC (port 4317)
+                            ▼
+                   ┌────────────────────┐
+                   │ OTEL Collector     │
+                   │ (Jaeger/Tempo)     │
+                   └────────┬───────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    MLOps Training Pipeline                      │
+│  1. Extract traces: examples/mlops/scripts/extract_jaeger_traces.py  │
+│  2. Convert format: examples/mlops/scripts/convert_traces_to_llmrouter.py  │
+│  3. Train model: examples/mlops/scripts/train_router.py        │
+│  4. Deploy artifact: examples/mlops/scripts/deploy_model.py    │
+└────────────────────────────┬────────────────────────────────────┘
+                             │
+                             ▼
+                    ┌────────────────────┐
+                    │ S3 / MinIO / NFS   │
+                    │ /app/models/       │
+                    └────────┬───────────┘
+                             │ ETag change detected
+                             ▼
+┌─────────────────────────────────────────────────────────────────┐
+│               Gateway (Hot Reload Manager)                      │
+│  1. _should_reload() detects model file change                 │
+│  2. _load_router() loads new model artifact                    │
+│  3. Routing uses updated strategy (zero downtime)              │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Inference-Only Runtime Requirement**:
+- **Production Container**: Only includes inference dependencies (PyTorch for model loading, NumPy)
+- **Training Container**: Separate image with full training stack (scikit-learn, MLflow, training libraries)
+- **Model Artifacts**: Pre-trained `.pt` files (pickled models or PyTorch state dicts)
+- **Why**: Reduces production image size, attack surface, and deployment complexity
+
+**Training Data Format**:
+```json
+{
+  "query": "What is machine learning?",
+  "candidates": ["gpt-4", "claude-3-opus", "llama-3-70b"],
+  "selected_model": "gpt-4",
+  "outcome": {
+    "latency_ms": 850,
+    "cost_usd": 0.06,
+    "user_rating": 5
+  }
+}
+```
+
+**Docker Compose Setup**:
+```yaml
+# examples/mlops/docker-compose.mlops.yml
+services:
+  trainer:
+    build:
+      context: .
+      dockerfile: Dockerfile.trainer
+    volumes:
+      - ./data:/data
+      - ./models:/models
+    command: python train_router.py --strategy knn --input /data/traces.json
+
+  deployer:
+    build:
+      context: .
+      dockerfile: Dockerfile.deployer
+    volumes:
+      - ./models:/models
+    environment:
+      - S3_BUCKET=llm-models
+    command: python deploy_model.py --model /models/knn_router.pt
+```
+
+### 10. Moat-Mode Design Patterns
+
+**Responsibility**: Support air-gapped and controlled-egress deployments with standardized protocols.
+
+**Reference**: See [`docs/moat-mode.md`](../../../docs/moat-mode.md) for complete runbook.
+
+**Key Design Constraints**:
+
+1. **No Cloud Dependencies**:
+   - ❌ AWS Secrets Manager → ✅ Kubernetes Secrets, HashiCorp Vault (self-hosted)
+   - ❌ AWS RDS → ✅ On-premises PostgreSQL with streaming replication
+   - ❌ ElastiCache → ✅ Redis Sentinel or on-premises Redis cluster
+   - ❌ CloudWatch/X-Ray → ✅ Self-hosted Jaeger/Tempo + Prometheus + Loki
+
+2. **TLS Certificate Management**:
+   - **Option A**: TLS termination at load balancer (Nginx) with internal CA certs
+   - **Option B**: End-to-end mTLS with client certificates for zero-trust environments
+
+3. **Network Segmentation**:
+   ```
+   ┌────────────────────────────────────────────────────┐
+   │              Moat Perimeter (No Internet)          │
+   │                                                    │
+   │  ┌────────┐    ┌────────┐    ┌──────────┐        │
+   │  │ Nginx  │───▶│Gateway │───▶│PostgreSQL│        │
+   │  │  :443  │    │ :4000  │    │  :5432   │        │
+   │  └────────┘    └────┬───┘    └──────────┘        │
+   │                     │                             │
+   │                     ▼                             │
+   │              ┌──────────────┐                     │
+   │              │ Redis :6379  │                     │
+   │              └──────────────┘                     │
+   │                     │                             │
+   │                     ▼                             │
+   │              ┌──────────────────┐                 │
+   │              │ OTEL Collector   │                 │
+   │              │ :4317 (gRPC)     │                 │
+   │              └────────┬─────────┘                 │
+   │                       │                           │
+   │          ┌────────────┴────────────┐              │
+   │          ▼                         ▼              │
+   │   ┌──────────┐               ┌──────────┐        │
+   │   │  Jaeger  │               │Prometheus│        │
+   │   └──────────┘               └──────────┘        │
+   └────────────────────────────────────────────────────┘
+   ```
+
+4. **Firewall Rules** (example):
+   ```bash
+   # Allow internal VPC traffic only
+   iptables -A INPUT -s 10.0.0.0/8 -j ACCEPT
+   iptables -A OUTPUT -d 10.0.0.0/8 -j ACCEPT
+
+   # Allow on-premises LLM provider (via VPC endpoint)
+   iptables -A OUTPUT -d <BEDROCK_VPC_ENDPOINT_IP> --dport 443 -j ACCEPT
+
+   # Deny all other egress
+   iptables -A OUTPUT -j DROP
+   ```
+
+5. **Offline Container Build**:
+   ```dockerfile
+   # Vendored dependencies (no PyPI access)
+   FROM python:3.11-slim
+   COPY vendor/python /tmp/vendor/python
+   RUN pip install --no-index --find-links=/tmp/vendor/python -r requirements.txt
+   ```
+
+**Protocol Compliance**:
+| Protocol | Port | Purpose | Moat-Mode Status |
+|----------|------|---------|------------------|
+| HTTP/HTTPS | 4000 | API endpoint | ✅ Internal TLS |
+| SSE | 4000 | Streaming responses | ✅ Same port as HTTP |
+| OTLP/gRPC | 4317 | Trace/metrics export | ✅ Internal collector |
+| OTLP/HTTP | 4318 | Trace/metrics (alt) | ✅ Internal collector |
+| PostgreSQL | 5432 | State persistence | ✅ mTLS supported |
+| Redis | 6379 | Caching/rate limit | ✅ AUTH + TLS |
+| Prometheus | 9090 | Metrics scrape | ✅ Internal Prometheus |
+
+**Backup/Restore Strategy**:
+```bash
+# Daily Postgres backup (cron job)
+0 2 * * * docker exec postgres pg_dump -U litellm litellm | gzip > /backup/litellm_$(date +\%Y\%m\%d).sql.gz
+
+# Redis AOF persistence (automatic)
+redis-server --appendonly yes --appendfsync everysec
+
+# Model artifacts versioning (S3/MinIO)
+mc version enable myminio/llm-models
+```
+
+**Split-Brain Prevention**:
+- Use database-backed leases for critical operations (config reload)
+- Circuit breaker pattern: Gateway fails closed if Postgres unreachable
+- Redis Sentinel for automatic failover (future enhancement)
 
 ## Data Models
 
@@ -744,7 +981,7 @@ async def test_routing_with_cache():
         "messages": [{"role": "user", "content": "Hello"}]
     })
     assert response1.status_code == 200
-    
+
     # Second identical request - cache hit
     response2 = await client.post("/v1/chat/completions", json={
         "model": "gpt-4",
@@ -971,4 +1208,3 @@ async def test_routing_with_cache():
 *For any* configuration file stored in S3, the Config Sync Manager should only download the file when the ETag changes, avoiding unnecessary downloads when the content is unchanged.
 
 **Validates: Requirements 10.3**
-

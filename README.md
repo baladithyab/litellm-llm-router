@@ -10,12 +10,20 @@
 
 ## Overview
 
-This project integrates [LiteLLM](https://github.com/BerriAI/litellm) (a unified LLM API gateway) with [LLMRouter](https://github.com/ulab-uiuc/LLMRouter) (an intelligent routing library with 18+ ML-based routing strategies including single-round, multi-round, personalized, and agentic routers) into a single, production-ready Docker container.
+This project serves as an **enhancement layer on top of the LiteLLM Proxy**. It combines [LiteLLM](https://github.com/BerriAI/litellm) (a unified LLM API gateway) with [LLMRouter](https://github.com/ulab-uiuc/LLMRouter) (an intelligent routing library) into a single, production-ready Docker container.
+
+We extend the core LiteLLM Proxy with:
+- **Intelligent Routing**: 18+ ML-based routing strategies (KNN, MLP, RL, etc.)
+- **High Availability**: Standardized protocols for Redis (caching), PostgreSQL (persistence), and S3 (config sync)
+- **Observability**: Native OTLP/OpenTelemetry integration
+- **Hot-Reloading**: Update routing strategies without container restarts
+- **Agentic Gateways**: Support for both **MCP** (Model Context Protocol) and **Anthropic Skills**
 
 ### Key Features
 
-- 🚀 **Unified LLM Gateway**: Access 100+ LLM providers through a single OpenAI-compatible API
+- 🚀 **Enhanced LiteLLM Proxy**: All LiteLLM features + ML routing + production hardening
 - 🧠 **ML-Powered Routing**: 18+ intelligent routing strategies across 4 categories (single-round, multi-round, personalized, agentic)
+- 🛠️ **Dual Agent Protocols**: Support for both **MCP** (standard) and **Anthropic Skills** (Computer Use)
 - 🔄 **Hot-Reloading**: Update routing strategies without container restarts
 - 📊 **High Availability**: Redis for distributed state, PostgreSQL for persistence, S3 for config sync
 - 🐳 **Multi-Architecture**: Supports both `linux/amd64` and `linux/arm64`
@@ -105,6 +113,7 @@ docker run -d \
 |----------|-------------|
 | [A2A Gateway](docs/a2a-gateway.md) | Agent-to-Agent protocol support |
 | [MCP Gateway](docs/mcp-gateway.md) | Model Context Protocol support |
+| [Skills Gateway](docs/skills-gateway.md) | Anthropic Skills (Computer Use) support |
 | [Vector Stores](docs/vector-stores.md) | Vector database integration |
 
 ## Supported Routing Strategies

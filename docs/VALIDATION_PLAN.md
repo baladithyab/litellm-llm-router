@@ -168,6 +168,15 @@ This section validates the complete MLOps loop: **Traces → Convert → Train �
 For the upcoming "Moat Mode" validation (Gate 9), refer to the detailed plan:
 [`docs/moat-mode.md`](docs/moat-mode.md:1)
 
+### 9. Gate 10: Skills Gateway Validation
+
+Validate Anthropic Skills (Computer Use) integration:
+
+1.  **Configuration**: Verify `ANTHROPIC_API_KEY` and beta-enabled model config.
+2.  **Endpoint Check**: `GET /v1/skills` returns 200 OK.
+3.  **Skill Invocation**: `POST /v1/skills` with `computer_use` payload works.
+4.  **Moat Mode**: Verify skills state persists in PostgreSQL (if configured).
+
 ---
 
 ## Validation Script

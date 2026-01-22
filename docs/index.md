@@ -1,6 +1,6 @@
 # LiteLLM + LLMRouter Documentation
 
-Welcome to the LiteLLM + LLMRouter documentation. This gateway combines LiteLLM's unified LLM API with LLMRouter's intelligent ML-powered routing strategies.
+Welcome to the LiteLLM + LLMRouter documentation. This project acts as an **enhancement layer on top of the LiteLLM Proxy**, combining its unified API with LLMRouter's intelligent ML-powered routing strategies and additional production-grade features.
 
 ## Quick Links
 
@@ -103,6 +103,7 @@ curl http://localhost:4000/v1/chat/completions \
 |----------|-------------|
 | [A2A Gateway](a2a-gateway.md) | Agent-to-Agent protocol |
 | [MCP Gateway](mcp-gateway.md) | Model Context Protocol |
+| [Skills Gateway](skills-gateway.md) | Anthropic Skills (Computer Use) |
 | [Vector Stores](vector-stores.md) | Vector database integration |
 
 ---

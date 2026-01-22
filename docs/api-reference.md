@@ -177,7 +177,7 @@ Authorization: Bearer sk-master-key
 ### Get Agent Card
 
 ```http
-GET /a2a/agents/{agent_id}/card
+GET /a2/a/agents/{agent_id}/card
 ```
 
 ### Unregister Agent
@@ -233,6 +233,38 @@ Authorization: Bearer sk-master-key
 ```http
 DELETE /mcp/servers/{server_id}
 Authorization: Bearer sk-master-key
+```
+
+## Skills Gateway Endpoints
+
+> See [Skills Gateway Guide](skills-gateway.md) for full details.
+> These endpoints are inherited from LiteLLM Proxy.
+
+### List Skills
+
+```http
+GET /v1/skills
+Authorization: Bearer sk-proxy-key
+```
+
+### Create/Invoke Skill
+
+```http
+POST /v1/skills
+Authorization: Bearer sk-proxy-key
+Content-Type: application/json
+
+{
+  "skill_name": "computer_use",
+  "parameters": { ... }
+}
+```
+
+### Get Skill Details
+
+```http
+GET /v1/skills/{skill_id}
+Authorization: Bearer sk-proxy-key
 ```
 
 ## Config Sync Endpoints

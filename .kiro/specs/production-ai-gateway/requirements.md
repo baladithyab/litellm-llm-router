@@ -2,20 +2,31 @@
 
 ## Introduction
 
-This document specifies the requirements for a production-ready AI Gateway that integrates LiteLLM (unified LLM API gateway supporting 100+ providers) with LLMRouter (ML-based intelligent routing with 18+ strategies). The system provides enterprise-grade features including high availability, persistence, observability, MLOps training pipelines, and support for modern protocols (A2A, MCP, Skills).
+This document specifies the requirements for a production-ready AI Gateway that serves as an **enhancement layer on top of the LiteLLM Proxy**. The system integrates LiteLLM (unified LLM API gateway supporting 100+ providers) with LLMRouter (ML-based intelligent routing with 18+ strategies) into a single, production-hardened container.
+
+**Project Positioning:** This gateway enhances—not replaces—the LiteLLM Proxy. We inherit all LiteLLM capabilities (authentication, caching, rate limiting, provider integrations) and extend them with ML routing, hot-reload, standardized HA protocols, and agentic gateway support.
+
+The system provides enterprise-grade features including high availability, persistence, observability, MLOps training pipelines, and support for modern protocols (A2A, MCP, Skills).
 
 ## Glossary
 
 - **LiteLLM**: Unified LLM API gateway providing OpenAI-compatible interface to 100+ LLM providers
 - **LLMRouter**: ML-based routing library with 18+ intelligent routing strategies
-- **Gateway**: The integrated system combining LiteLLM and LLMRouter
+- **Gateway**: The integrated system combining LiteLLM and LLMRouter as an enhancement layer
+- **Enhancement Layer**: The philosophy of extending (not replacing) LiteLLM core functionality
 - **A2A**: Agent-to-Agent protocol (Google's standard for agent communication)
-- **MCP**: Model Context Protocol (Anthropic's standard for tool/context integration)
+- **MCP**: Model Context Protocol (open standard for connecting LLMs to tools/data sources)
+- **Skills**: Anthropic-specific agentic capabilities (Computer Use, Bash, Text Editor) exposed via `/v1/skills` endpoints
 - **Router_Strategy**: Algorithm for selecting optimal LLM based on query characteristics
 - **Hot_Reload**: Dynamic configuration/model updates without service restart
-- **Config_Sync**: Background process synchronizing configuration from remote storage (S3/GCS)
-- **MLOps_Pipeline**: Training and evaluation system for routing models
+- **Config_Sync**: Background process synchronizing configuration from remote storage (S3/MinIO/GCS)
+- **MLOps_Pipeline**: Training and evaluation system for routing models based on OTLP traces
+- **MLOps_Loop**: OTEL traces → training → model deployment → hot reload cycle
+- **Inference-Only_Runtime**: Production container with only model loading dependencies (no training libraries)
 - **HA_Stack**: High availability infrastructure (Redis, PostgreSQL, load balancer)
+- **Moat-Mode**: Air-gapped or controlled-egress deployment with no external internet dependencies
+- **OTLP**: OpenTelemetry Protocol for exporting traces, metrics, and logs
+- **ETag**: HTTP entity tag used for detecting S3 object changes without downloading
 
 ## Requirements
 
@@ -70,9 +81,15 @@ This document specifies the requirements for a production-ready AI Gateway that 
 5. WHEN multiple Gateway instances are deployed, THE HA_Stack SHALL distribute requests via load balancer (Nginx) and share state via Redis
 6. THE Gateway SHALL expose `/health/liveliness` and `/health/readiness` endpoints for orchestrator health checks
 
-### Requirement 5: MLOps Training Pipeline
+### Requirement 5: MLOps Training Pipeline (OTEL Traces → Training → Hot Reload)
 
-**User Story:** As a machine learning engineer, I want to train and evaluate custom routing models on my workload data, so that I can optimize routing decisions for my specific use case.
+**User Story:** As a machine learning engineer, I want to train and evaluate custom routing models on my workload data from OpenTelemetry traces, so that I can optimize routing decisions for my specific use case and hot-reload models without downtime.
+
+**MLOps Loop:**
+1. **Trace Collection**: Gateway emits OTLP traces with routing decisions and outcomes
+2. **Training**: Extract traces → convert to LLMRouter format → train models
+3. **Deployment**: Upload model artifact to S3/local storage
+4. **Hot Reload**: Gateway detects new model via ETag/mtime and reloads without restart
 
 #### Acceptance Criteria
 
@@ -81,7 +98,11 @@ This document specifies the requirements for a production-ready AI Gateway that 
 3. WHEN training data is provided in the LLMRouter format, THE MLOps_Pipeline SHALL train a routing model and save it to the configured output path
 4. THE MLOps_Pipeline SHALL support evaluation metrics including accuracy, latency, cost, and quality scores
 5. THE MLOps_Pipeline SHALL generate model artifacts compatible with the Gateway's hot reload mechanism
-6. THE MLOps_Pipeline SHALL support integration with observability traces for training data collection
+6. THE MLOps_Pipeline SHALL support extraction of training data from OpenTelemetry traces (Jaeger, Tempo, CloudWatch X-Ray)
+7. THE MLOps_Pipeline SHALL include scripts for converting OTLP trace data to LLMRouter training format
+8. THE Gateway SHALL support **inference-only runtime requirements**: Model artifacts must be pre-trained and deployable without training dependencies (scikit-learn, torch for training) in the production container
+9. THE Gateway production image SHALL NOT include training dependencies (PyTorch, scikit-learn model training libraries), only inference dependencies
+10. WHEN routing_strategy_args.model_s3_bucket is configured, THE MLOps_Pipeline MAY upload trained models to S3/MinIO for Gateway hot-reload
 
 ### Requirement 6: Observability and Tracing
 
@@ -124,6 +145,8 @@ This document specifies the requirements for a production-ready AI Gateway that 
 
 **User Story:** As a tool developer, I want to expose MCP servers through the gateway, so that LLMs can access external tools and context.
 
+**Context:** This requirement covers the **Model Context Protocol** (an open standard for connecting LLMs to data sources/tools). This is distinct from Anthropic Skills (see Requirement 9).
+
 #### Acceptance Criteria
 
 1. WHEN MCP_GATEWAY_ENABLED is true, THE Gateway SHALL expose MCP protocol endpoints at `/v1/mcp/server` and `/mcp/{server_name}`
@@ -141,6 +164,25 @@ This document specifies the requirements for a production-ready AI Gateway that 
 13. THE Gateway SHALL expose `/v1/mcp/server/health` GET endpoint for checking MCP server health status
 14. THE Gateway SHALL support PUT requests to `/v1/mcp/server/{server_id}` for full server updates
 15. THE Gateway SHALL support MCP access groups via `/v1/mcp/access_groups` endpoint for permission management
+
+### Requirement 9: Anthropic Skills Endpoint Support
+
+**User Story:** As an agent developer, I want to use Anthropic's "Skills" (Computer Use, Bash, Text Editor) natively, so that I can leverage agentic capabilities without custom integration work.
+
+**Context:** Skills are Anthropic-specific agentic capabilities that predate MCP. The gateway inherits these endpoints directly from LiteLLM and provides operational enhancements (observability, database backing, routing).
+
+#### Acceptance Criteria
+
+1. THE Gateway SHALL expose `/v1/skills` endpoints inherited from LiteLLM Proxy without modification
+2. THE Gateway SHALL support POST `/v1/skills` for creating/invoking skills
+3. THE Gateway SHALL support GET `/v1/skills` for listing available skills
+4. THE Gateway SHALL support GET `/v1/skills/{id}` for retrieving skill details
+5. THE Gateway SHALL support DELETE `/v1/skills/{id}` for removing skills
+6. WHEN database_url is configured, THE Gateway SHALL persist skill registrations to PostgreSQL (LiteLLM functionality)
+7. THE Gateway SHALL support routing Skills requests to multiple Anthropic accounts via model_list configuration
+8. THE Gateway SHALL emit OpenTelemetry spans for Skills invocations with attributes including skill_id, duration, and status
+9. WHEN moat-mode is enabled, THE Gateway SHALL support Skills operations without external internet access (using configured Anthropic endpoints)
+10. THE Gateway documentation SHALL clearly distinguish Skills (Anthropic-specific) from MCP (open standard) and explain when to use each
 
 ### Requirement 9: Multi-Architecture Docker Support
 
@@ -234,3 +276,108 @@ This document specifies the requirements for a production-ready AI Gateway that 
 6. THE Gateway SHALL emit startup logs confirming registered strategies, routes, and configuration
 7. THE Gateway SHALL log errors with stack traces and context for debugging, including trace correlation IDs
 
+---
+
+## Non-Goals / Out of Scope
+
+This section clarifies what the gateway does **NOT** aim to provide, to avoid duplicating LiteLLM core features and to maintain a clear boundary as an enhancement layer.
+
+### Not Replacing LiteLLM Core Features
+
+1. **Provider Integrations**: We do NOT fork or modify LiteLLM's provider implementations. All provider compatibility (OpenAI, Anthropic, Bedrock, Azure, 100+ others) is inherited directly from upstream LiteLLM.
+2. **Authentication Mechanisms**: We use LiteLLM's existing authentication (master_key, virtual keys, team-based access control) without modification.
+3. **Rate Limiting & Budget Enforcement**: We rely on LiteLLM's built-in rate limiting and budget tracking, not custom implementations.
+4. **Caching Logic**: Response caching is handled by LiteLLM's cache layer (Redis, in-memory). We do not implement custom caching.
+5. **Request Validation**: Parameter validation and OpenAI compatibility are maintained by LiteLLM.
+
+### Not Providing LLM Training/Hosting
+
+1. **LLM Model Training**: This gateway does NOT train foundation models (GPT, Claude, etc.). It only trains **routing models** to select among pre-existing LLMs.
+2. **LLM Model Hosting**: We do not host or serve LLMs. The gateway routes requests to external providers or on-premises endpoints.
+3. **Fine-Tuning LLMs**: We support routing to fine-tuned models (e.g., `ft:gpt-4:org:model:id`) but do not perform the fine-tuning.
+
+### Not Replacing Observability Backends
+
+1. **Trace Storage**: We export OTLP traces but do not store them. Use Jaeger, Tempo, or CloudWatch X-Ray.
+2. **Metrics Storage**: We expose Prometheus metrics but do not store them. Use Prometheus, Grafana Cloud, or CloudWatch.
+3. **Log Aggregation**: We export structured logs but do not aggregate them. Use Loki, CloudWatch Logs, or Elasticsearch.
+
+### Not Providing Infrastructure Management
+
+1. **Database Provisioning**: We require PostgreSQL but do not provision it. Use RDS, managed Postgres, or your own cluster.
+2. **Redis Provisioning**: We require Redis but do not manage it. Use ElastiCache, Redis Sentinel, or your own cluster.
+3. **Load Balancer Configuration**: We document deployment behind Nginx/HAProxy/ALB but do not provide the load balancer itself.
+4. **Container Orchestration**: We provide Docker images and Helm charts but do not manage Kubernetes/ECS clusters.
+
+### Not Implementing Custom Protocols
+
+1. **gRPC Gateway**: We support HTTP/REST and SSE, not gRPC endpoints (LiteLLM uses HTTP).
+2. **GraphQL**: We do not provide a GraphQL interface to the gateway.
+3. **WebSocket**: Streaming uses SSE, not WebSockets.
+
+### Not Supporting Legacy LiteLLM Versions
+
+1. **LiteLLM Version Guarantee**: We track a specific LiteLLM version (via git submodule) and test against it. Arbitrary LiteLLM versions are not supported.
+2. **Backward Compatibility**: We follow LiteLLM's breaking changes. If LiteLLM makes a breaking change, we may also introduce breaking changes.
+
+### Not Providing Managed Services
+
+1. **SaaS Offering**: This is a self-hosted solution, not a managed cloud service.
+2. **Support/SLA**: This is an open-source project without commercial support or uptime guarantees.
+3. **Compliance Certifications**: We document security features and moat-mode deployment but do not provide SOC 2, HIPAA, or FedRAMP certifications.
+
+### Explicitly Out of Scope for Initial Release
+
+1. **Multi-Region Active-Active**: Initial release supports single-region HA. Multi-region is future work.
+2. **OIDC/SAML Authentication**: Documented as future roadmap (Q2 2026). Use API keys or external proxy (oauth2-proxy) in the interim.
+3. **Built-in PKI/CA**: Certificate management relies on external CA (HashiCorp Vault, EJBCA, on-prem CA). We do not provide a built-in CA.
+4. **Automated Certificate Rotation**: Must be implemented externally (cert-manager for K8s, AWS ACM for cloud). We support manual cert updates.
+5. **Web UI for Management**: Configuration is via YAML and REST API. No web dashboard is provided (use LiteLLM's UI if needed).
+
+---
+
+## Related Documentation
+
+- **[`docs/moat-mode.md`](../../../docs/moat-mode.md)**: Complete runbook for air-gapped deployments, network security, and compliance
+- **[`docs/skills-gateway.md`](../../../docs/skills-gateway.md)**: Anthropic Skills endpoint usage and configuration
+- **[`docs/mcp-gateway.md`](../../../docs/mcp-gateway.md)**: Model Context Protocol server registration and tool invocation
+- **[`docs/a2a-gateway.md`](../../../docs/a2a-gateway.md)**: Agent-to-Agent protocol for multi-agent systems
+- **[`docs/mlops-training.md`](../../../docs/mlops-training.md)**: Training routing models from OTLP traces
+- **[`docs/observability.md`](../../../docs/observability.md)**: OpenTelemetry configuration and semantic conventions
+- **[`docs/high-availability.md`](../../../docs/high-availability.md)**: HA deployment patterns (Redis Sentinel, Postgres replication, load balancing)
+
+### Requirement 16: Moat-Mode / Air-Gapped Deployment Support
+
+**User Story:** As a security or compliance engineer, I want to deploy the gateway in air-gapped or controlled-egress environments, so that I can meet data residency, zero-trust, and regulatory requirements.
+
+**Context:** "Moat-mode" refers to deployments with no or limited external internet access. See [`docs/moat-mode.md`](../../../docs/moat-mode.md) for complete runbook.
+
+#### Acceptance Criteria
+
+1. THE Gateway SHALL operate without external internet access when all dependencies are sourced from internal networks
+2. THE Gateway SHALL support on-premises LLM providers via VPC-private endpoints (e.g., AWS Bedrock PrivateLink, self-hosted vLLM)
+3. THE Gateway SHALL support TLS termination at load balancer OR end-to-end mTLS with certificates from internal CA
+4. THE Gateway SHALL support authentication via local mechanisms: API keys stored in PostgreSQL, Kubernetes Secrets, or self-hosted Vault
+5. THE Gateway SHALL support state persistence via on-premises PostgreSQL and Redis with NO cloud-managed services (no AWS RDS, ElastiCache, etc.)
+6. THE Gateway SHALL support observability via self-hosted OpenTelemetry collector with OTLP export to Jaeger/Tempo/Prometheus, with NO cloud telemetry (CloudWatch, X-Ray, Datadog SaaS)
+7. THE Gateway SHALL support configuration and model storage via self-hosted S3-compatible storage (MinIO, Ceph) or NFS mounts
+8. THE Gateway SHALL support air-gapped container builds via vendored dependencies (no PyPI access during build)
+9. THE Gateway SHALL support database migrations and schema updates compatible with zero-downtime rolling deployments
+10. THE Gateway documentation SHALL include firewall rules, network port requirements, and certificate management procedures for moat-mode deployments
+
+### Requirement 17: Protocol and Interface Compatibility
+
+**User Story:** As a platform integrator, I want standardized protocol support and predictable interfaces, so that I can integrate the gateway with existing infrastructure (load balancers, observability backends, databases).
+
+#### Acceptance Criteria
+
+1. THE Gateway SHALL support HTTP/1.1 and HTTP/2 for all API endpoints
+2. THE Gateway SHALL support Server-Sent Events (SSE) for streaming responses at `/chat/completions` (with `stream: true`) and A2A streaming endpoints
+3. THE Gateway SHALL support OpenTelemetry Protocol (OTLP) for traces, metrics, and logs via gRPC (port 4317) and HTTP (port 4318)
+4. THE Gateway SHALL support PostgreSQL 13+ for state persistence with connection pooling via pgbouncer or native pooling
+5. THE Gateway SHALL support Redis 6+ for caching and rate limiting with Sentinel support for HA deployments
+6. THE Gateway SHALL expose Prometheus-compatible metrics at `/metrics` endpoint
+7. THE Gateway SHALL support S3-compatible object storage (AWS S3, MinIO, Ceph S3 Gateway) for configuration and model artifacts
+8. THE Gateway SHALL support reverse proxy deployment behind Nginx, HAProxy, or cloud load balancers (ALB, NLB) with health checks at `/health/liveliness` and `/health/readiness`
+9. THE Gateway SHALL support container orchestrators (Docker Compose, Kubernetes, ECS, EKS) with standard OCI container interfaces
+10. WHEN deployed in Kubernetes, THE Gateway SHALL support HPA (Horizontal Pod Autoscaling) based on CPU/memory/custom metrics

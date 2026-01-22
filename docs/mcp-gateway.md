@@ -22,6 +22,9 @@ The MCP Gateway enables integration with [Model Context Protocol](https://modelc
 
 This document covers the **REST API** endpoints provided by LLMRouter at `/llmrouter/mcp/*`.
 
+> **Note on Anthropic Skills:**
+> If you are looking for Anthropic's "Computer Use" or "Bash" skills, those are distinct from MCP. See the [Skills Gateway Guide](skills-gateway.md) for details. We support both protocols.
+
 ## Enabling MCP Gateway
 
 Set the environment variable:

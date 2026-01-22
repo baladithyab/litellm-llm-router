@@ -29,6 +29,8 @@ model_list:
       api_key: os.environ/ANTHROPIC_API_KEY
 ```
 
+### Issue
+
 ### Router Settings
 
 Configure routing behavior:
@@ -119,6 +121,20 @@ The `llm_candidates.json` file describes available models for LLMRouter:
   }
 }
 ```
+
+## Configuring Anthropic Skills
+
+To use Anthropic Skills (Computer Use, etc.), configure a model with your Anthropic API key.
+
+```yaml
+model_list:
+  - model_name: claude-3-5-sonnet
+    litellm_params:
+      model: anthropic/claude-3-5-sonnet-20241022
+      api_key: os.environ/ANTHROPIC_API_KEY
+```
+
+**Moat Mode Note:** For production, you can back the `litellm_proxy` skills state with a database (PostgreSQL) instead of memory. This is configured via the standard LiteLLM database settings.
 
 ## Local Testing Stack
 
