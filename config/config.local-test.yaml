@@ -129,7 +129,7 @@ router_settings:
 
   # LLMRouter strategy arguments
   routing_strategy_args:
-    # Path to the trained KNN router model (.pkl file)
+    # Path to the trained KNN router model (.pkl file or directory containing .pkl)
     # Must be a FILE not a directory for proper mtime-based hot reload
     model_path: /app/models/knn_router.pkl
     # Path to LLM candidates JSON (model metadata for routing decisions)
@@ -138,6 +138,15 @@ router_settings:
     hot_reload: true
     # Reload interval in seconds (check for model updates every 10s for demo)
     reload_interval: 10
+    # Embedding model for runtime inference (must match training pipeline)
+    # Default: sentence-transformers/all-MiniLM-L6-v2
+    embedding_model: sentence-transformers/all-MiniLM-L6-v2
+    # Device for embedding model ('cpu' or 'cuda')
+    embedding_device: cpu
+    # Optional: mapping from predicted labels to LLM candidate keys
+    # label_mapping:
+    #   model-label-1: claude-4.5-sonnet
+    #   model-label-2: nova-pro
 
   num_retries: 2
   retry_after: 5
