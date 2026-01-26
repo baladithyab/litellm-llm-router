@@ -6,9 +6,7 @@ on:
   pull_request:
     branches: [main]
 
-env:
-  IMAGE_NAME: litellm-llmrouter
-  TEST_PORT: 4010
+# Removed IMAGE_NAME and TEST_PORT env vars - Docker builds moved to docker-build.yml
 
 jobs:
   # Detect what changed to optimize CI
@@ -16,7 +14,6 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       python: ${{ steps.filter.outputs.python }}
-      docker: ${{ steps.filter.outputs.docker }}
       compose: ${{ steps.filter.outputs.compose }}
     steps:
       - uses: actions/checkout@v4
@@ -29,11 +26,6 @@ jobs:
               - 'tests/**'
               - 'requirements.txt'
               - 'pyproject.toml'
-            docker:
-              - 'docker/**'
-              - 'src/**'
-              - 'requirements.txt'
-              - 'config/**'
             compose:
               - 'docker-compose*.yml'
               - 'examples/mlops/docker-compose*.yml'
@@ -84,151 +76,8 @@ jobs:
         env:
           PYTHONPATH: src
 
-  # Build Docker image and run container smoke tests
-  docker-build-and-test:
-    runs-on: ubuntu-latest
-    needs: changes
-    if: ${{ needs.changes.outputs.docker == 'true' || github.event_name == 'push' }}
-    steps:
-      - uses: actions/checkout@v4
-
-      # Free up disk space - the image is ~4GB and runners have limited space
-      - name: Free up disk space
-        run: |
-          echo "=== Disk space before cleanup ==="
-          df -h /
-          # Remove unnecessary tools to free up space
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf /usr/local/lib/android
-          sudo rm -rf /opt/ghc
-          sudo rm -rf /opt/hostedtoolcache/CodeQL
-          sudo docker system prune -af
-          echo "=== Disk space after cleanup ==="
-          df -h /
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build Docker image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: ./docker/Dockerfile
-          push: false
-          load: true
-          tags: ${{ env.IMAGE_NAME }}:test
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Verify image was built
-        run: |
-          docker images ${{ env.IMAGE_NAME }}:test
-          # Verify image exists and has correct tags
-          docker inspect ${{ env.IMAGE_NAME }}:test --format='{{.Id}}' || exit 1
-          echo "✅ Image built successfully"
-
-      - name: Verify image labels
-        run: |
-          echo "Checking OCI labels..."
-          docker inspect ${{ env.IMAGE_NAME }}:test --format='{{json .Config.Labels}}' | jq .
-          # Verify required labels exist
-          docker inspect ${{ env.IMAGE_NAME }}:test --format='{{index .Config.Labels "org.opencontainers.image.source"}}' | grep -q "github.com" || echo "Warning: Missing source label"
-          echo "✅ Image labels verified"
-
-      - name: Start container for smoke tests
-        run: |
-          # Create minimal config for testing
-          mkdir -p /tmp/test-config
-          cat > /tmp/test-config/config.yaml << 'EOF'
-          model_list:
-            - model_name: test-model
-              litellm_params:
-                model: fake-openai-endpoint
-                api_key: fake-key
-                api_base: http://localhost:8080
-
-          general_settings:
-            master_key: sk-test-ci-key
-
-          litellm_settings:
-            drop_params: true
-          EOF
-
-          # Start container with test config
-          docker run -d \
-            --name test-container \
-            -p ${{ env.TEST_PORT }}:4000 \
-            -v /tmp/test-config:/app/config:ro \
-            -e LITELLM_CONFIG_PATH=/app/config/config.yaml \
-            ${{ env.IMAGE_NAME }}:test
-
-          # Wait for container to start
-          echo "Waiting for container to be ready..."
-          for i in {1..30}; do
-            if curl -s http://localhost:${{ env.TEST_PORT }}/health > /dev/null 2>&1; then
-              echo "✅ Container is ready!"
-              break
-            fi
-            if [ $i -eq 30 ]; then
-              echo "❌ Container failed to start"
-              docker logs test-container
-              exit 1
-            fi
-            sleep 2
-          done
-
-      - name: Run container smoke tests
-        run: |
-          echo "=== Health Check ==="
-          curl -s http://localhost:${{ env.TEST_PORT }}/health | jq . || true
-
-          echo ""
-          echo "=== Models Endpoint ==="
-          curl -s -H "Authorization: Bearer sk-test-ci-key" \
-            http://localhost:${{ env.TEST_PORT }}/v1/models | jq . || true
-
-          echo ""
-          echo "=== Verify Process Running ==="
-          docker exec test-container ps aux | head -20
-
-          echo ""
-          echo "=== Container Logs (last 50 lines) ==="
-          docker logs test-container --tail 50
-
-          echo ""
-          echo "✅ Smoke tests passed"
-
-      - name: Test container security (non-root)
-        run: |
-          # Verify container runs as non-root
-          USER_ID=$(docker exec test-container id -u)
-          if [ "$USER_ID" = "0" ]; then
-            echo "❌ Container is running as root (UID 0)"
-            exit 1
-          fi
-          echo "✅ Container running as non-root user (UID: $USER_ID)"
-
-      - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@0.28.0
-        with:
-          image-ref: '${{ env.IMAGE_NAME }}:test'
-          format: 'sarif'
-          output: 'trivy-results.sarif'
-          severity: 'CRITICAL,HIGH'
-          # Don't fail the build on vulnerabilities - report only
-          exit-code: '0'
-
-      - name: Upload Trivy scan results to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@v3
-        if: always()
-        with:
-          sarif_file: 'trivy-results.sarif'
-
-      - name: Cleanup
-        if: always()
-        run: |
-          docker stop test-container || true
-          docker rm test-container || true
+  # Docker build, smoke tests, and security scans are handled in docker-build.yml
+  # This workflow focuses on Python linting, unit tests, and compose validation
 
   validate-compose:
     runs-on: ubuntu-latest

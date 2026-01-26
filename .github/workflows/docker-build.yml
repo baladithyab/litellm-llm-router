@@ -34,10 +34,241 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
+  TEST_PORT: 4010
 
 jobs:
-  # Check if we need to rebuild
+  # =============================================================================
+  # PR WORKFLOW: Single-arch build → export artifact → smoke test → trivy scan
+  # =============================================================================
+  pr-build:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write  # For SARIF upload (only works for non-fork PRs)
+    outputs:
+      artifact-name: ${{ steps.export.outputs.artifact-name }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Free up disk space - the image is ~4GB and runners have limited space
+      - name: Free up disk space
+        run: |
+          echo "=== Disk space before cleanup ==="
+          df -h /
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo docker system prune -af
+          echo "=== Disk space after cleanup ==="
+          df -h /
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=pr
+
+      - name: Build and export to OCI tarball
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./docker/Dockerfile
+          platforms: linux/amd64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          outputs: type=oci,dest=/tmp/image.tar
+          cache-from: type=gha,scope=build-linux-amd64
+          cache-to: type=gha,mode=max,scope=build-linux-amd64
+
+      - name: Export artifact metadata
+        id: export
+        run: |
+          echo "artifact-name=docker-image-pr-${{ github.event.pull_request.number }}" >> $GITHUB_OUTPUT
+
+      - name: Upload OCI image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.export.outputs.artifact-name }}
+          path: /tmp/image.tar
+          retention-days: 1
+          if-no-files-found: error
+
+  pr-smoke-test:
+    needs: pr-build
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download OCI image artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.pr-build.outputs.artifact-name }}
+          path: /tmp
+
+      - name: Load image from OCI tarball
+        run: |
+          # Load OCI image using skopeo + docker load
+          # OCI archives need to be converted to docker format first
+          mkdir -p /tmp/oci-image
+          tar -xf /tmp/image.tar -C /tmp/oci-image
+          # Use docker buildx to load OCI format
+          docker load < /tmp/image.tar 2>/dev/null || {
+            # Fallback: use skopeo if available, otherwise buildx imagetools
+            echo "Direct load failed, using buildx..."
+            docker buildx build --load -t litellm-llmrouter:test - < /tmp/image.tar 2>/dev/null || {
+              # Final fallback: extract and import
+              echo "Using manual OCI extraction..."
+              skopeo copy oci-archive:/tmp/image.tar docker-daemon:litellm-llmrouter:test 2>/dev/null || {
+                echo "Installing skopeo..."
+                sudo apt-get update && sudo apt-get install -y skopeo
+                skopeo copy oci-archive:/tmp/image.tar docker-daemon:litellm-llmrouter:test
+              }
+            }
+          }
+          echo "✅ Image loaded successfully"
+          docker images
+
+      - name: Tag image for testing
+        run: |
+          # Find the loaded image and tag it consistently
+          IMAGE_ID=$(docker images --format '{{.Repository}}:{{.Tag}}' | grep -E 'ghcr.io|litellm' | head -1)
+          if [ -n "$IMAGE_ID" ]; then
+            docker tag "$IMAGE_ID" litellm-llmrouter:test
+          fi
+          docker images litellm-llmrouter:test
+
+      - name: Start container for smoke tests
+        run: |
+          mkdir -p /tmp/test-config
+          cat > /tmp/test-config/config.yaml << 'EOF'
+          model_list:
+            - model_name: test-model
+              litellm_params:
+                model: fake-openai-endpoint
+                api_key: fake-key
+                api_base: http://localhost:8080
+
+          general_settings:
+            master_key: sk-test-ci-key
+
+          litellm_settings:
+            drop_params: true
+          EOF
+
+          docker run -d \
+            --name test-container \
+            -p ${{ env.TEST_PORT }}:4000 \
+            -v /tmp/test-config:/app/config:ro \
+            -e LITELLM_CONFIG_PATH=/app/config/config.yaml \
+            litellm-llmrouter:test
+
+          echo "Waiting for container to be ready..."
+          for i in {1..30}; do
+            if curl -s http://localhost:${{ env.TEST_PORT }}/health > /dev/null 2>&1; then
+              echo "✅ Container is ready!"
+              break
+            fi
+            if [ $i -eq 30 ]; then
+              echo "❌ Container failed to start"
+              docker logs test-container
+              exit 1
+            fi
+            sleep 2
+          done
+
+      - name: Run container smoke tests
+        run: |
+          echo "=== Health Check ==="
+          curl -s http://localhost:${{ env.TEST_PORT }}/health | jq . || true
+
+          echo ""
+          echo "=== Models Endpoint ==="
+          curl -s -H "Authorization: Bearer sk-test-ci-key" \
+            http://localhost:${{ env.TEST_PORT }}/v1/models | jq . || true
+
+          echo ""
+          echo "=== Verify Process Running ==="
+          docker exec test-container ps aux | head -20
+
+          echo ""
+          echo "=== Container Logs (last 50 lines) ==="
+          docker logs test-container --tail 50
+
+          echo ""
+          echo "✅ Smoke tests passed"
+
+      - name: Test container security (non-root)
+        run: |
+          USER_ID=$(docker exec test-container id -u)
+          if [ "$USER_ID" = "0" ]; then
+            echo "❌ Container is running as root (UID 0)"
+            exit 1
+          fi
+          echo "✅ Container running as non-root user (UID: $USER_ID)"
+
+      - name: Cleanup
+        if: always()
+        run: |
+          docker stop test-container || true
+          docker rm test-container || true
+
+  pr-trivy-scan:
+    needs: pr-build
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download OCI image artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.pr-build.outputs.artifact-name }}
+          path: /tmp
+
+      - name: Run Trivy vulnerability scanner on OCI archive
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          input: /tmp/image.tar
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '0'
+
+      - name: Upload Trivy scan results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        # Only upload SARIF on non-fork PRs (token has write access)
+        if: github.event.pull_request.head.repo.full_name == github.repository
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+      - name: Display Trivy results summary
+        if: always()
+        run: |
+          echo "=== Trivy Scan Summary ==="
+          if [ -f trivy-results.sarif ]; then
+            cat trivy-results.sarif | jq -r '.runs[0].results | length' | xargs -I {} echo "Found {} vulnerabilities"
+          fi
+
+  # =============================================================================
+  # PUSH/TAG WORKFLOW: Multi-arch build → merge manifest → security scan
+  # =============================================================================
   check-rebuild:
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     outputs:
       should_build: ${{ steps.check.outputs.should_build }}
@@ -49,7 +280,6 @@ jobs:
       - name: Check if rebuild needed
         id: check
         run: |
-          # Always build on tags, workflow_dispatch, or force rebuild
           if [[ "${{ github.ref_type }}" == "tag" ]] || \
              [[ "${{ github.event_name }}" == "workflow_dispatch" ]] || \
              [[ "${{ github.event.inputs.force_rebuild }}" == "true" ]]; then
@@ -58,7 +288,6 @@ jobs:
             exit 0
           fi
 
-          # Check if Docker-related files changed
           CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || echo "")
 
           if echo "$CHANGED_FILES" | grep -qE '^(docker/|src/|requirements\.txt|config/)'; then
@@ -71,12 +300,12 @@ jobs:
 
   build:
     needs: check-rebuild
-    if: ${{ needs.check-rebuild.outputs.should_build == 'true' || github.event_name == 'pull_request' }}
+    if: github.event_name != 'pull_request' && needs.check-rebuild.outputs.should_build == 'true'
     permissions:
       contents: read
       packages: write
-      id-token: write  # Required for SLSA provenance attestations
-      attestations: write  # Required for artifact attestations
+      id-token: write
+      attestations: write
 
     strategy:
       fail-fast: false
@@ -92,13 +321,11 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        # Note: submodules not needed - Dockerfile clones from GitHub
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
       - name: Log in to Container Registry
-        if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
@@ -112,7 +339,6 @@ jobs:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
             type=ref,event=branch
-            type=ref,event=pr
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=sha,prefix=
@@ -134,20 +360,17 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=build-${{ steps.platform.outputs.pair }}
           cache-to: type=gha,mode=max,scope=build-${{ steps.platform.outputs.pair }}
-          outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=${{ github.event_name != 'pull_request' }}
-          # Enable provenance and SBOM generation for supply-chain security
-          provenance: ${{ github.event_name != 'pull_request' }}
-          sbom: ${{ github.event_name != 'pull_request' }}
+          outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
+          provenance: true
+          sbom: true
 
       - name: Export digest
-        if: github.event_name != 'pull_request'
         run: |
           mkdir -p /tmp/digests
           digest="${{ steps.build.outputs.digest }}"
           touch "/tmp/digests/${digest#sha256:}"
 
       - name: Upload digest
-        if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
           name: digests-${{ steps.platform.outputs.pair }}
@@ -158,10 +381,13 @@ jobs:
   merge:
     runs-on: ubuntu-latest
     needs: [check-rebuild, build]
-    if: ${{ needs.check-rebuild.outputs.should_build == 'true' && github.event_name != 'pull_request' }}
+    if: github.event_name != 'pull_request' && needs.check-rebuild.outputs.should_build == 'true'
     permissions:
       contents: read
       packages: write
+    outputs:
+      image-tag: ${{ steps.meta.outputs.version }}
+      image-digest: ${{ steps.manifest.outputs.digest }}
 
     steps:
       - name: Download digests
@@ -194,11 +420,76 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Create manifest list and push
+        id: manifest
         working-directory: /tmp/digests
         run: |
           docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
             $(printf '${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@sha256:%s ' *)
 
+          # Get the digest of the multi-arch manifest
+          MANIFEST_DIGEST=$(docker buildx imagetools inspect ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.version }} --format '{{.Manifest.Digest}}')
+          echo "digest=${MANIFEST_DIGEST}" >> $GITHUB_OUTPUT
+
       - name: Inspect image
         run: |
           docker buildx imagetools inspect ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.version }}
+
+  # Security scan for pushed images (runs on fresh runner to avoid disk space issues)
+  security-scan:
+    needs: [check-rebuild, merge]
+    if: github.event_name != 'pull_request' && needs.check-rebuild.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+      packages: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Free up disk space for scan
+      - name: Free up disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo docker system prune -af
+          df -h /
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull image for scanning
+        run: |
+          # Pull by SHA tag for deterministic scanning
+          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          docker images
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: '${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '0'
+
+      - name: Upload Trivy scan results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+      - name: Run Trivy table output for logs
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: '${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}'
+          format: 'table'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '0'
