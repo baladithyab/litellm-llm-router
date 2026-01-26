@@ -35,6 +35,8 @@ env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
   TEST_PORT: 4010
+  # Registry cache references (per-arch for better cache isolation)
+  CACHE_REPO: ghcr.io/${{ github.repository }}
 
 jobs:
   # =============================================================================
@@ -45,6 +47,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      packages: read  # Read cache from registry
       security-events: write  # For SARIF upload (only works for non-fork PRs)
     outputs:
       artifact-name: ${{ steps.export.outputs.artifact-name }}
@@ -68,6 +71,14 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      # Login to GHCR for cache access (read-only for PRs from forks)
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Extract metadata
         id: meta
         uses: docker/metadata-action@v5
@@ -76,6 +87,20 @@ jobs:
           tags: |
             type=ref,event=pr
 
+      # Determine if this is a fork PR (cannot write cache)
+      - name: Check if fork PR
+        id: fork-check
+        run: |
+          if [[ "${{ github.event.pull_request.head.repo.full_name }}" != "${{ github.repository }}" ]]; then
+            echo "is_fork=true" >> $GITHUB_OUTPUT
+            echo "⚠️ Fork PR detected - cache export disabled"
+          else
+            echo "is_fork=false" >> $GITHUB_OUTPUT
+            echo "✅ Same-repo PR - cache export enabled"
+          fi
+
+      # Build with registry cache (mode=min for PRs to reduce export time)
+      # Fork PRs: read cache only; Same-repo PRs: read/write cache
       - name: Build and export to OCI tarball
         id: build
         uses: docker/build-push-action@v5
@@ -86,8 +111,10 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           outputs: type=oci,dest=/tmp/image.tar
-          cache-from: type=gha,scope=build-linux-amd64
-          cache-to: type=gha,mode=max,scope=build-linux-amd64
+          # Registry cache with zstd compression for smaller cache layers
+          cache-from: type=registry,ref=${{ env.CACHE_REPO }}:buildcache-amd64
+          # Only export cache for same-repo PRs (mode=min to reduce export size)
+          cache-to: ${{ steps.fork-check.outputs.is_fork == 'false' && format('type=registry,ref={0}:buildcache-amd64,mode=min,compression=zstd', env.CACHE_REPO) || '' }}
 
       - name: Export artifact metadata
         id: export
@@ -249,9 +276,9 @@ jobs:
           severity: 'CRITICAL,HIGH'
           exit-code: '0'
 
+      # Only upload SARIF for same-repo PRs (fork PRs don't have write access)
       - name: Upload Trivy scan results to GitHub Security tab
         uses: github/codeql-action/upload-sarif@v3
-        # Only upload SARIF on non-fork PRs (token has write access)
         if: github.event.pull_request.head.repo.full_name == github.repository
         with:
           sarif_file: 'trivy-results.sarif'
@@ -313,8 +340,10 @@ jobs:
         include:
           - platform: linux/amd64
             runner: ubuntu-24.04
+            cache_suffix: amd64
           - platform: linux/arm64
             runner: ubuntu-24.04-arm
+            cache_suffix: arm64
 
     runs-on: ${{ matrix.runner }}
 
@@ -350,6 +379,7 @@ jobs:
           platform=${{ matrix.platform }}
           echo "pair=${platform//\//-}" >> $GITHUB_OUTPUT
 
+      # Build with registry cache (mode=max for push builds to maximize cache hits)
       - name: Build and push by digest
         id: build
         uses: docker/build-push-action@v5
@@ -358,8 +388,9 @@ jobs:
           file: ./docker/Dockerfile
           platforms: ${{ matrix.platform }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=build-${{ steps.platform.outputs.pair }}
-          cache-to: type=gha,mode=max,scope=build-${{ steps.platform.outputs.pair }}
+          # Registry cache with zstd compression and per-arch refs
+          cache-from: type=registry,ref=${{ env.CACHE_REPO }}:buildcache-${{ matrix.cache_suffix }}
+          cache-to: type=registry,ref=${{ env.CACHE_REPO }}:buildcache-${{ matrix.cache_suffix }},mode=max,compression=zstd
           outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
           provenance: true
           sbom: true

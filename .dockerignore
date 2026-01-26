@@ -2,10 +2,12 @@
 # Docker Build Exclusions for LiteLLM + LLMRouter
 # =============================================================================
 # Reduces build context size and speeds up Docker builds
+# Keep in sync with files needed by docker/Dockerfile
 
 # Git and version control
 .git
 .gitignore
+.gitmodules
 .github
 
 # Documentation (not needed in container)
@@ -91,6 +93,13 @@ notebooks/
 # Reference libraries (large, built separately)
 reference/
 
+# Project planning and specs (not needed in container)
+plans/
+.kiro/
+
+# Prisma migrations (client generated at build time)
+prisma/
+
 # MLOps artifacts (handled separately)
 models/*.pt
 models/*.pkl
@@ -98,9 +107,18 @@ data/
 mlruns/
 artifacts/
 
+# Scripts not needed in container
+scripts/
+
+# Custom routers dir (mounted at runtime, not baked in)
+custom_routers/
+
 # Misc
 LICENSE
 CHANGELOG.md
 CONTRIBUTING.md
 Makefile
 *.tgz
+lefthook.yml
+.pre-commit-config.yaml
+.yamllint.yaml

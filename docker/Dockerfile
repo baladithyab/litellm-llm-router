@@ -6,6 +6,11 @@
 # Uses uv for fast, reproducible Python package management
 # Supports: linux/amd64, linux/arm64
 #
+# Build optimization:
+# - BuildKit cache mounts for uv/pip to avoid baking caches into layers
+# - All cleanup in same RUN statements to minimize layer size
+# - Dependencies installed before app source for better layer reuse
+#
 # Security features:
 # - Non-root user execution
 # - Minimal base image (slim variant)
@@ -36,18 +41,19 @@ ARG LITELLM_VERSION
 
 WORKDIR /build
 
-# Install git for cloning LLMRouter
-RUN apt-get update && apt-get install -y --no-install-recommends git && \
-    rm -rf /var/lib/apt/lists/* && \
-    rm -rf /var/cache/apt/*
+# Install git for cloning LLMRouter (apt cleanup in same layer)
+RUN apt-get update && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/* /var/cache/apt/*
 
 # Clone and build LLMRouter wheel from GitHub at pinned commit
-RUN git clone --depth 1 https://github.com/ulab-uiuc/LLMRouter.git /tmp/LLMRouter && \
-    cd /tmp/LLMRouter && \
-    git fetch --depth 1 origin ${LLMROUTER_COMMIT} && \
-    git checkout ${LLMROUTER_COMMIT} && \
-    uv build --wheel --out-dir /wheels && \
-    rm -rf /tmp/LLMRouter/.git
+# All git operations and cleanup in single RUN to prevent .git in layer
+RUN --mount=type=cache,target=/root/.cache/uv \
+    git clone --depth 1 https://github.com/ulab-uiuc/LLMRouter.git /tmp/LLMRouter \
+    && cd /tmp/LLMRouter \
+    && git fetch --depth 1 origin ${LLMROUTER_COMMIT} \
+    && git checkout ${LLMROUTER_COMMIT} \
+    && uv build --wheel --out-dir /wheels \
+    && rm -rf /tmp/LLMRouter
 
 # ==============================================================================
 # Stage 2: Runtime - Production image with uv and OTEL support
@@ -76,7 +82,7 @@ RUN groupadd -r -g 1000 litellm && \
 
 WORKDIR /app
 
-# Install minimal runtime dependencies in single layer
+# Install minimal runtime dependencies in single layer (cleanup in same RUN)
 # Note: build-essential needed for uvloop compilation
 # Note: libatomic1 needed for Prisma/Node.js on slim images
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -85,36 +91,37 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     tini \
     libatomic1 \
-    && rm -rf /var/lib/apt/lists/* \
-    && rm -rf /var/cache/apt/* \
-    && rm -rf /root/.cache
+    && rm -rf /var/lib/apt/lists/* /var/cache/apt/* /tmp/* /root/.cache
 
-# Copy and install wheels from builder
+# Copy wheels from builder (can be cleaned after install)
 COPY --from=builder /wheels /wheels
-RUN uv pip install --system /wheels/*.whl || true
 
-# Install LiteLLM with proxy extras
-RUN uv pip install --system "litellm[proxy]==${LITELLM_VERSION}"
-
-# Install OpenTelemetry for distributed tracing (single layer)
-RUN uv pip install --system \
-    opentelemetry-api \
-    opentelemetry-sdk \
-    opentelemetry-exporter-otlp \
-    opentelemetry-exporter-otlp-proto-grpc \
-    opentelemetry-exporter-otlp-proto-http \
-    opentelemetry-instrumentation-fastapi \
-    opentelemetry-instrumentation-httpx \
-    opentelemetry-instrumentation-logging \
-    opentelemetry-instrumentation-requests \
-    && rm -rf /root/.cache/uv
-
-# Copy pyproject.toml and install litellm-llmrouter with all optional dependencies
-# This ensures single source of truth for dependencies (pyproject.toml)
+# Install all Python dependencies in a single layer with cache mounts
+# Order: wheels → LiteLLM → OTEL → project deps (for optimal cache reuse)
+# Copy pyproject.toml first for dependency layer caching
 COPY pyproject.toml /tmp/pyproject.toml
 COPY src/ /tmp/src/
-RUN cd /tmp && uv pip install --system ".[prod]" && \
-    rm -rf /wheels /tmp/* /root/.cache
+
+RUN --mount=type=cache,target=/root/.cache/uv \
+    # Install LLMRouter wheel
+    uv pip install --system /wheels/*.whl || true \
+    # Install LiteLLM with proxy extras
+    && uv pip install --system "litellm[proxy]==${LITELLM_VERSION}" \
+    # Install OpenTelemetry for distributed tracing
+    && uv pip install --system \
+        opentelemetry-api \
+        opentelemetry-sdk \
+        opentelemetry-exporter-otlp \
+        opentelemetry-exporter-otlp-proto-grpc \
+        opentelemetry-exporter-otlp-proto-http \
+        opentelemetry-instrumentation-fastapi \
+        opentelemetry-instrumentation-httpx \
+        opentelemetry-instrumentation-logging \
+        opentelemetry-instrumentation-requests \
+    # Install litellm-llmrouter with all optional dependencies
+    && cd /tmp && uv pip install --system ".[prod]" \
+    # Cleanup wheels and temp files
+    && rm -rf /wheels /tmp/*
 
 # Pre-generate Prisma client and fix permissions on LiteLLM directories
 # This is done as root to avoid runtime permission errors
@@ -127,12 +134,12 @@ RUN SCHEMA_PATH=$(python -c "import litellm; import os; print(os.path.join(os.pa
     chmod -R 777 /usr/local/lib/python3.12/site-packages/prisma/ 2>/dev/null || true && \
     chmod -R 777 /usr/local/lib/python3.12/site-packages/litellm/proxy/_experimental/out/ 2>/dev/null || true
 
-# Copy application files
+# Copy application files (after dependencies for better layer caching)
 COPY --chown=litellm:litellm src/litellm_llmrouter /app/litellm_llmrouter
 COPY --chown=litellm:litellm docker/entrypoint.sh /app/entrypoint.sh
 COPY --chown=litellm:litellm config/ /app/config/
 
-# Create directories with proper permissions
+# Create directories with proper permissions and cleanup
 RUN mkdir -p /app/models /app/data /app/custom_routers && \
     chown -R litellm:litellm /app && \
     chmod +x /app/entrypoint.sh && \
