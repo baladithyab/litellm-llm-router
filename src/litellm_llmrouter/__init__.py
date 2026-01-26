@@ -17,6 +17,8 @@ Usage:
 
     # Register all LLMRouter strategies with LiteLLM
     register_llmrouter_strategies()
+
+Build: Migrated CI to uv for faster package management (2026-01-26)
 """
 
 # IMPORTANT: Import the routing strategy patch FIRST
@@ -62,7 +64,7 @@ from .mcp_gateway import (
 )
 from .routes import router as api_router
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 __all__ = [
     # Router patch (for llmrouter-* strategies)
     "patch_litellm_router",
