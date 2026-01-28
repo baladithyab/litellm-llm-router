@@ -395,12 +395,12 @@ class SecurityTester:
                             TestResult(
                                 test_name="3b. Budget exceeded → 4xx error",
                                 passed=True,
-                                details=f"Budget limit enforced after {i+1} attempts (HTTP {response.status_code})",
+                                details=f"Budget limit enforced after {i + 1} attempts (HTTP {response.status_code})",
                             )
                         )
                         break
                 except Exception as e:
-                    self.log(f"  Request {i+1} error: {e}")
+                    self.log(f"  Request {i + 1} error: {e}")
 
             if not exceeded:
                 self.add_result(
@@ -998,7 +998,7 @@ class SecurityTester:
         report.append(f"Total Tests: {total}")
         report.append(f"Passed: {passed} ✅")
         report.append(f"Failed: {failed} ❌")
-        report.append(f"Success Rate: {100*passed/total if total > 0 else 0:.1f}%")
+        report.append(f"Success Rate: {100 * passed / total if total > 0 else 0:.1f}%")
         report.append("")
         report.append("=" * 80)
         report.append("PASS/FAIL MATRIX")

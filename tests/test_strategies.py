@@ -13,14 +13,15 @@ import pytest
 
 # Check if litellm is available
 try:
-    import litellm
+    import litellm  # noqa: F401
+
     LITELLM_AVAILABLE = True
 except ImportError:
     LITELLM_AVAILABLE = False
 
 pytestmark = pytest.mark.skipif(
     not LITELLM_AVAILABLE,
-    reason="litellm package not installed - unit tests require litellm"
+    reason="litellm package not installed - unit tests require litellm",
 )
 
 
@@ -228,7 +229,7 @@ class TestMCPGateway:
             server = MCPServer(
                 server_id="test-server",
                 name="Test MCP Server",
-                url="http://localhost:9000/mcp",
+                url="http://192.168.1.100:9000/mcp",  # Private IP - allowed by SSRF
                 transport=MCPTransport.STREAMABLE_HTTP,
                 tools=["search", "fetch"],
             )
@@ -250,7 +251,7 @@ class TestMCPGateway:
             server = MCPServer(
                 server_id="server1",
                 name="Server 1",
-                url="http://localhost:9001",
+                url="http://192.168.1.101:9001",  # Private IP - allowed by SSRF
                 tools=["tool_a", "tool_b"],
             )
             gateway.register_server(server)

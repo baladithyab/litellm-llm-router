@@ -134,9 +134,7 @@ def _request(
             # If we expect SSE (allow_sse=True), then this is a success case for streaming endpoints
             # Otherwise, it's an error because we expected a JSON response
             if not allow_sse:
-                error = (
-                    "Unexpected streaming response " f"(content-type={content_type})"
-                )
+                error = f"Unexpected streaming response (content-type={content_type})"
         else:
             body = _safe_json(resp)
             if logger.isEnabledFor(logging.DEBUG):

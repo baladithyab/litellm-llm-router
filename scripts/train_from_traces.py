@@ -612,7 +612,7 @@ def run_full_pipeline(skip_upload: bool = False, skip_validation: bool = False):
     # Step 7: Validation
     if not skip_validation:
         validation = validate_routing()
-        print(f"\n   Validation Success Rate: {validation['success_rate']*100:.1f}%")
+        print(f"\n   Validation Success Rate: {validation['success_rate'] * 100:.1f}%")
 
     print("\n" + "=" * 60)
     print("✅ PIPELINE COMPLETE")
@@ -685,7 +685,7 @@ Environment Variables:
     if args.validate:
         print("\n🔍 Running validation only...")
         result = validate_routing()
-        print(f"\n   Success Rate: {result['success_rate']*100:.1f}%")
+        print(f"\n   Success Rate: {result['success_rate'] * 100:.1f}%")
         return 0 if result["success_rate"] > 0 else 1
 
     if args.train or args.full_pipeline:

@@ -203,7 +203,7 @@ class E2ETestRunner:
                     model_results
                 )
                 print(
-                    f"   {model}: {len(model_results)} reqs, {success_rate*100:.1f}% success, {avg_lat:.0f}ms avg"
+                    f"   {model}: {len(model_results)} reqs, {success_rate * 100:.1f}% success, {avg_lat:.0f}ms avg"
                 )
 
     async def export_traces(self) -> str | None:

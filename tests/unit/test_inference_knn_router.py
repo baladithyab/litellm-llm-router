@@ -6,6 +6,7 @@ These tests verify that:
 2. The router correctly embeds queries and predicts labels
 3. Hot reload triggers properly based on file mtime changes
 4. Label mapping works as expected
+5. Pickle security is enforced (LLMROUTER_ALLOW_PICKLE_MODELS required)
 """
 
 import os
@@ -28,6 +29,108 @@ except ImportError:
 pytestmark = pytest.mark.skipif(
     not SKLEARN_AVAILABLE, reason="scikit-learn package not installed"
 )
+
+
+@pytest.fixture(autouse=True)
+def enable_pickle_loading(monkeypatch):
+    """
+    Enable pickle loading for tests by setting required env var.
+
+    Security Note: This is required because pickle loading is disabled by default
+    to prevent RCE attacks. Tests explicitly enable it since they use controlled
+    test fixtures.
+    """
+    monkeypatch.setenv("LLMROUTER_ALLOW_PICKLE_MODELS", "true")
+    # Reload the module to pick up the new env var value
+    import litellm_llmrouter.strategies as strategies_module
+
+    # Update the module-level flag since it's evaluated at import time
+    monkeypatch.setattr(strategies_module, "ALLOW_PICKLE_MODELS", True)
+    yield
+
+
+class TestPickleSecurity:
+    """Test pickle loading security controls."""
+
+    def test_pickle_loading_blocked_by_default(self, monkeypatch):
+        """Test that pickle loading is blocked when env var is not set."""
+        from litellm_llmrouter.strategies import (
+            InferenceKNNRouter,
+            PickleSecurityError,
+        )
+        import litellm_llmrouter.strategies as strategies_module
+
+        # Disable pickle loading
+        monkeypatch.setenv("LLMROUTER_ALLOW_PICKLE_MODELS", "false")
+        monkeypatch.setattr(strategies_module, "ALLOW_PICKLE_MODELS", False)
+
+        with tempfile.NamedTemporaryFile(suffix=".pkl", delete=False) as f:
+            knn = KNeighborsClassifier(n_neighbors=2)
+            X_train = np.array([[0.1, 0.2, 0.3], [0.8, 0.9, 0.7]])
+            y_train = ["model-a", "model-b"]
+            knn.fit(X_train, y_train)
+            pickle.dump(knn, f)
+            pkl_path = f.name
+
+        try:
+            with pytest.raises(PickleSecurityError) as exc_info:
+                InferenceKNNRouter(model_path=pkl_path)
+
+            # Verify error message includes remediation steps
+            assert "LLMROUTER_ALLOW_PICKLE_MODELS=true" in str(exc_info.value)
+            assert "RCE risk" in str(exc_info.value)
+        finally:
+            os.unlink(pkl_path)
+
+    def test_pickle_loading_allowed_with_env_var(
+        self, mock_embedder, trained_knn_model, model_pkl_file
+    ):
+        """Test that pickle loading works when env var is explicitly set."""
+        from litellm_llmrouter.strategies import InferenceKNNRouter
+
+        with patch(
+            "litellm_llmrouter.strategies._get_sentence_transformer",
+            return_value=mock_embedder,
+        ):
+            # Should not raise - env var is set by fixture
+            router = InferenceKNNRouter(model_path=model_pkl_file)
+
+        # Verify model was loaded
+        assert router.knn_model is not None
+        assert hasattr(router.knn_model, "predict")
+
+    @pytest.fixture
+    def mock_embedder(self):
+        """Create a mock sentence transformer embedder."""
+        mock = MagicMock()
+        mock.encode.return_value = np.array([[0.1, 0.2, 0.3]])
+        return mock
+
+    @pytest.fixture
+    def trained_knn_model(self):
+        """Create a simple trained KNN model for testing."""
+        knn = KNeighborsClassifier(n_neighbors=2)
+        X_train = np.array(
+            [
+                [0.1, 0.2, 0.3],
+                [0.15, 0.25, 0.35],
+                [0.8, 0.9, 0.7],
+                [0.85, 0.95, 0.75],
+            ]
+        )
+        y_train = ["claude-sonnet", "claude-sonnet", "nova-pro", "nova-pro"]
+        knn.fit(X_train, y_train)
+        return knn
+
+    @pytest.fixture
+    def model_pkl_file(self, trained_knn_model):
+        """Save trained model to a temporary .pkl file."""
+        with tempfile.NamedTemporaryFile(suffix=".pkl", delete=False) as f:
+            pickle.dump(trained_knn_model, f)
+            pkl_path = f.name
+        yield pkl_path
+        if os.path.exists(pkl_path):
+            os.unlink(pkl_path)
 
 
 class TestInferenceKNNRouter:

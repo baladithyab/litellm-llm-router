@@ -13,33 +13,19 @@ Tests for the A2A tracing module to verify:
 """
 
 import asyncio
-import sys
 from unittest.mock import MagicMock, patch, AsyncMock
 
 import pytest
 
-# Mock all external dependencies before importing
-sys.modules["litellm"] = MagicMock()
-sys.modules["litellm._logging"] = MagicMock()
-sys.modules["litellm.proxy"] = MagicMock()
-sys.modules["litellm.proxy.proxy_server"] = MagicMock()
-sys.modules["fastapi"] = MagicMock()
-sys.modules["pydantic"] = MagicMock()
+from opentelemetry import trace
+from opentelemetry.trace import StatusCode
 
-from opentelemetry import trace  # noqa: E402
-from opentelemetry.sdk.trace import TracerProvider  # noqa: E402
-from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter  # noqa: E402
-from opentelemetry.sdk.trace.export import SimpleSpanProcessor  # noqa: E402
-from opentelemetry.trace import StatusCode  # noqa: E402
-
-# Set up the TracerProvider once at module load time
-_exporter = InMemorySpanExporter()
-_provider = TracerProvider()
-_provider.add_span_processor(SimpleSpanProcessor(_exporter))
-trace.set_tracer_provider(_provider)
+# NOTE: TracerProvider is set up in tests/unit/conftest.py to avoid conflicts
+# between A2A and MCP tracing tests. Do NOT call trace.set_tracer_provider here.
 
 # Import the module under test directly (not through __init__.py)
-import importlib.util  # noqa: E402
+# This avoids importing the full litellm_llmrouter package which has heavy deps
+import importlib.util
 
 spec = importlib.util.spec_from_file_location(
     "a2a_tracing", "src/litellm_llmrouter/a2a_tracing.py"
@@ -71,11 +57,11 @@ ATTR_HTTP_STATUS_CODE = a2a_tracing.ATTR_HTTP_STATUS_CODE
 
 
 @pytest.fixture(autouse=True)
-def clear_spans():
-    """Clear spans before and after each test."""
-    _exporter.clear()
-    yield _exporter
-    _exporter.clear()
+def clear_spans(shared_span_exporter):
+    """Clear spans before and after each test using shared exporter from conftest."""
+    shared_span_exporter.clear()
+    yield shared_span_exporter
+    shared_span_exporter.clear()
 
 
 class TestA2ATracingMiddleware:

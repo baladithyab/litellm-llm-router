@@ -127,7 +127,11 @@ class MCPGateway:
 def mcp_server_id_strategy(draw):
     """Generate valid MCP server IDs."""
     prefix = draw(st.sampled_from(["mcp", "server", "tool", "github", "slack"]))
-    suffix = draw(st.text(alphabet="abcdefghijklmnopqrstuvwxyz0123456789", min_size=1, max_size=10))
+    suffix = draw(
+        st.text(
+            alphabet="abcdefghijklmnopqrstuvwxyz0123456789", min_size=1, max_size=10
+        )
+    )
     return f"{prefix}-{suffix}"
 
 
@@ -136,7 +140,9 @@ def mcp_server_name_strategy(draw):
     """Generate valid MCP server names."""
     words = ["GitHub", "Slack", "Jira", "Database", "File", "Search", "API", "Tool"]
     name = draw(st.sampled_from(words))
-    suffix = draw(st.text(alphabet="ABCDEFGHIJKLMNOPQRSTUVWXYZ", min_size=0, max_size=5))
+    suffix = draw(
+        st.text(alphabet="ABCDEFGHIJKLMNOPQRSTUVWXYZ", min_size=0, max_size=5)
+    )
     return f"{name} MCP Server{suffix}"
 
 
@@ -168,7 +174,13 @@ def mcp_tool_name_strategy(draw):
 @st.composite
 def mcp_resource_name_strategy(draw):
     """Generate valid MCP resource names."""
-    resources = ["repo_contents", "user_profile", "channel_history", "file_tree", "task_list"]
+    resources = [
+        "repo_contents",
+        "user_profile",
+        "channel_history",
+        "file_tree",
+        "task_list",
+    ]
     return draw(st.sampled_from(resources))
 
 
@@ -190,7 +202,7 @@ def mcp_server_strategy(draw):
     num_resources = draw(st.integers(min_value=0, max_value=3))
     resources = [draw(mcp_resource_name_strategy()) for _ in range(num_resources)]
     auth_type = draw(mcp_auth_type_strategy())
-    
+
     return MCPServer(
         server_id=server_id,
         name=name,
@@ -211,11 +223,11 @@ def mcp_server_strategy(draw):
 class TestMCPServerToolLoadingProperty:
     """
     Property 12: MCP Server Tool Loading
-    
+
     For any MCP server configured in mcp_servers section or registered via API,
     the Gateway should load all tool definitions from the server and make them
     available in the tools list.
-    
+
     Validates: Requirements 8.2, 8.3, 8.4
     """
 
@@ -226,10 +238,10 @@ class TestMCPServerToolLoadingProperty:
         gateway = MCPGateway()
         gateway.enabled = True
         gateway.register_server(server)
-        
+
         tools = gateway.list_tools()
         tool_names = [t["tool"] for t in tools if t["server_id"] == server.server_id]
-        
+
         assert set(tool_names) == set(server.tools)
 
     @settings(max_examples=100, suppress_health_check=[HealthCheck.too_slow])
@@ -239,10 +251,12 @@ class TestMCPServerToolLoadingProperty:
         gateway = MCPGateway()
         gateway.enabled = True
         gateway.register_server(server)
-        
+
         resources = gateway.list_resources()
-        resource_names = [r["resource"] for r in resources if r["server_id"] == server.server_id]
-        
+        resource_names = [
+            r["resource"] for r in resources if r["server_id"] == server.server_id
+        ]
+
         assert set(resource_names) == set(server.resources)
 
     @settings(max_examples=100, suppress_health_check=[HealthCheck.too_slow])
@@ -252,7 +266,7 @@ class TestMCPServerToolLoadingProperty:
         gateway = MCPGateway()
         gateway.enabled = True
         gateway.register_server(server)
-        
+
         tools = gateway.list_tools()
         for tool in tools:
             if tool["server_id"] == server.server_id:
@@ -262,16 +276,23 @@ class TestMCPServerToolLoadingProperty:
                 assert tool["server_name"] == server.name
 
     @settings(max_examples=100, suppress_health_check=[HealthCheck.too_slow])
-    @given(servers=st.lists(mcp_server_strategy(), min_size=1, max_size=5, unique_by=lambda s: s.server_id))
+    @given(
+        servers=st.lists(
+            mcp_server_strategy(),
+            min_size=1,
+            max_size=5,
+            unique_by=lambda s: s.server_id,
+        )
+    )
     def test_multiple_servers_tools_aggregated(self, servers: list[MCPServer]):
         """Tools from multiple servers should all appear in the aggregated list."""
         gateway = MCPGateway()
         gateway.enabled = True
         for server in servers:
             gateway.register_server(server)
-        
+
         tools = gateway.list_tools()
-        
+
         # Count expected tools
         expected_count = sum(len(s.tools) for s in servers)
         assert len(tools) == expected_count
@@ -284,17 +305,17 @@ class TestMCPServerToolLoadingProperty:
         gateway.enabled = True
         gateway.register_server(server)
         gateway.unregister_server(server.server_id)
-        
+
         tools = gateway.list_tools()
         server_tools = [t for t in tools if t["server_id"] == server.server_id]
-        
+
         assert len(server_tools) == 0
 
 
 class TestMCPServerRegistrationProperty:
     """
     Tests for MCP server registration and retrieval.
-    
+
     Validates: Requirements 8.2
     """
 
@@ -305,9 +326,9 @@ class TestMCPServerRegistrationProperty:
         gateway = MCPGateway()
         gateway.enabled = True
         gateway.register_server(server)
-        
+
         retrieved = gateway.get_server(server.server_id)
-        
+
         assert retrieved is not None
         assert retrieved.server_id == server.server_id
         assert retrieved.name == server.name
@@ -320,25 +341,32 @@ class TestMCPServerRegistrationProperty:
         gateway = MCPGateway()
         gateway.enabled = True
         gateway.register_server(server)
-        
+
         servers = gateway.list_servers()
         server_ids = [s.server_id for s in servers]
-        
+
         assert server.server_id in server_ids
 
     @settings(max_examples=100)
-    @given(servers=st.lists(mcp_server_strategy(), min_size=1, max_size=5, unique_by=lambda s: s.server_id))
+    @given(
+        servers=st.lists(
+            mcp_server_strategy(),
+            min_size=1,
+            max_size=5,
+            unique_by=lambda s: s.server_id,
+        )
+    )
     def test_all_registered_servers_discoverable(self, servers: list[MCPServer]):
         """All registered servers should be discoverable."""
         gateway = MCPGateway()
         gateway.enabled = True
         for server in servers:
             gateway.register_server(server)
-        
+
         listed = gateway.list_servers()
         listed_ids = {s.server_id for s in listed}
         expected_ids = {s.server_id for s in servers}
-        
+
         assert expected_ids == listed_ids
 
     @settings(max_examples=100)
@@ -348,9 +376,9 @@ class TestMCPServerRegistrationProperty:
         gateway = MCPGateway()
         gateway.enabled = True
         gateway.register_server(server)
-        
+
         retrieved = gateway.get_server(server.server_id)
-        
+
         assert retrieved.server_id == server.server_id
         assert retrieved.name == server.name
         assert retrieved.url == server.url
@@ -373,9 +401,9 @@ class TestMCPServerUnregistrationProperty:
         gateway.enabled = True
         gateway.register_server(server)
         gateway.unregister_server(server.server_id)
-        
+
         retrieved = gateway.get_server(server.server_id)
-        
+
         assert retrieved is None
 
     @settings(max_examples=100)
@@ -386,10 +414,10 @@ class TestMCPServerUnregistrationProperty:
         gateway.enabled = True
         gateway.register_server(server)
         gateway.unregister_server(server.server_id)
-        
+
         servers = gateway.list_servers()
         server_ids = [s.server_id for s in servers]
-        
+
         assert server.server_id not in server_ids
 
     @settings(max_examples=100)
@@ -399,7 +427,7 @@ class TestMCPServerUnregistrationProperty:
         gateway = MCPGateway()
         gateway.enabled = True
         result = gateway.unregister_server(server_id)
-        
+
         assert result is False
 
 
@@ -415,7 +443,7 @@ class TestMCPGatewayDisabledProperty:
         gateway = MCPGateway()
         gateway.enabled = False
         gateway.register_server(server)
-        
+
         # Server should not be stored
         retrieved = gateway.get_server(server.server_id)
         assert retrieved is None
@@ -445,17 +473,21 @@ class TestMCPTransportProperty:
             transport=transport,
         )
         gateway.register_server(server)
-        
+
         retrieved = gateway.get_server("test-server")
-        
+
         assert retrieved.transport == transport
 
     def test_all_transport_types_valid(self):
         """All defined transport types should be valid."""
         gateway = MCPGateway()
         gateway.enabled = True
-        valid_transports = [MCPTransport.STDIO, MCPTransport.SSE, MCPTransport.STREAMABLE_HTTP]
-        
+        valid_transports = [
+            MCPTransport.STDIO,
+            MCPTransport.SSE,
+            MCPTransport.STREAMABLE_HTTP,
+        ]
+
         for transport in valid_transports:
             server = MCPServer(
                 server_id=f"test-{transport.value}",
@@ -464,11 +496,10 @@ class TestMCPTransportProperty:
                 transport=transport,
             )
             gateway.register_server(server)
-            
+
             retrieved = gateway.get_server(f"test-{transport.value}")
             assert retrieved is not None
             assert retrieved.transport == transport
-
 
 
 # =============================================================================
@@ -502,21 +533,21 @@ class MCPTool:
 def openapi_to_mcp_tool(operation: OpenAPIOperation) -> MCPTool:
     """
     Convert an OpenAPI operation to an MCP tool definition.
-    
+
     This is a simplified implementation for testing purposes.
     The actual implementation would be more comprehensive.
     """
     # Build input schema from parameters and request body
     properties = {}
     required = []
-    
+
     for param in operation.parameters:
         param_name = param.get("name", "")
         param_schema = param.get("schema", {"type": "string"})
         properties[param_name] = param_schema
         if param.get("required", False):
             required.append(param_name)
-    
+
     # Add request body properties if present
     if operation.request_body:
         content = operation.request_body.get("content", {})
@@ -525,17 +556,19 @@ def openapi_to_mcp_tool(operation: OpenAPIOperation) -> MCPTool:
         body_props = body_schema.get("properties", {})
         properties.update(body_props)
         required.extend(body_schema.get("required", []))
-    
+
     input_schema = {
         "type": "object",
         "properties": properties,
     }
     if required:
         input_schema["required"] = required
-    
+
     return MCPTool(
         name=operation.operation_id,
-        description=operation.summary or operation.description or f"{operation.method.upper()} {operation.path}",
+        description=operation.summary
+        or operation.description
+        or f"{operation.method.upper()} {operation.path}",
         input_schema=input_schema,
     )
 
@@ -545,10 +578,10 @@ def openapi_operation_strategy(draw):
     """Generate valid OpenAPI operations."""
     verbs = ["get", "post", "put", "patch", "delete"]
     resources = ["users", "items", "orders", "products", "tasks"]
-    
+
     method = draw(st.sampled_from(verbs))
     resource = draw(st.sampled_from(resources))
-    
+
     # Generate operation ID
     action_map = {
         "get": "get",
@@ -558,33 +591,37 @@ def openapi_operation_strategy(draw):
         "delete": "delete",
     }
     operation_id = f"{action_map[method]}_{resource}"
-    
+
     # Generate path
     has_id = draw(st.booleans()) and method != "post"
     path = f"/api/{resource}" + ("/{id}" if has_id else "")
-    
+
     # Generate parameters
     params = []
     if has_id:
-        params.append({
-            "name": "id",
-            "in": "path",
-            "required": True,
-            "schema": {"type": "string"},
-        })
-    
+        params.append(
+            {
+                "name": "id",
+                "in": "path",
+                "required": True,
+                "schema": {"type": "string"},
+            }
+        )
+
     # Add optional query params
     num_query_params = draw(st.integers(min_value=0, max_value=3))
     query_param_names = ["limit", "offset", "filter", "sort", "page"]
     for i in range(num_query_params):
         if i < len(query_param_names):
-            params.append({
-                "name": query_param_names[i],
-                "in": "query",
-                "required": False,
-                "schema": {"type": "string"},
-            })
-    
+            params.append(
+                {
+                    "name": query_param_names[i],
+                    "in": "query",
+                    "required": False,
+                    "schema": {"type": "string"},
+                }
+            )
+
     # Generate request body for POST/PUT/PATCH
     request_body = None
     if method in ["post", "put", "patch"]:
@@ -602,7 +639,7 @@ def openapi_operation_strategy(draw):
                 }
             }
         }
-    
+
     return OpenAPIOperation(
         operation_id=operation_id,
         method=method,
@@ -616,11 +653,11 @@ def openapi_operation_strategy(draw):
 class TestOpenAPIToMCPConversionProperty:
     """
     Property 13: OpenAPI to MCP Conversion
-    
+
     For any valid OpenAPI specification provided via spec_path configuration,
     the Gateway should generate corresponding MCP tool definitions that can
     be invoked via the MCP protocol.
-    
+
     Validates: Requirements 8.6
     """
 
@@ -629,7 +666,7 @@ class TestOpenAPIToMCPConversionProperty:
     def test_operation_id_becomes_tool_name(self, operation: OpenAPIOperation):
         """The OpenAPI operation ID should become the MCP tool name."""
         tool = openapi_to_mcp_tool(operation)
-        
+
         assert tool.name == operation.operation_id
 
     @settings(max_examples=100)
@@ -637,7 +674,7 @@ class TestOpenAPIToMCPConversionProperty:
     def test_summary_becomes_description(self, operation: OpenAPIOperation):
         """The OpenAPI summary should become the MCP tool description."""
         tool = openapi_to_mcp_tool(operation)
-        
+
         # Description should be non-empty
         assert len(tool.description) > 0
         # If summary exists, it should be used
@@ -649,7 +686,7 @@ class TestOpenAPIToMCPConversionProperty:
     def test_parameters_become_input_schema(self, operation: OpenAPIOperation):
         """OpenAPI parameters should be converted to MCP input schema properties."""
         tool = openapi_to_mcp_tool(operation)
-        
+
         # All parameters should appear in input schema
         for param in operation.parameters:
             param_name = param.get("name", "")
@@ -660,11 +697,11 @@ class TestOpenAPIToMCPConversionProperty:
     def test_required_parameters_marked_required(self, operation: OpenAPIOperation):
         """Required OpenAPI parameters should be marked required in MCP schema."""
         tool = openapi_to_mcp_tool(operation)
-        
+
         required_params = [
             p["name"] for p in operation.parameters if p.get("required", False)
         ]
-        
+
         schema_required = tool.input_schema.get("required", [])
         for param_name in required_params:
             assert param_name in schema_required
@@ -674,13 +711,13 @@ class TestOpenAPIToMCPConversionProperty:
     def test_request_body_properties_in_schema(self, operation: OpenAPIOperation):
         """Request body properties should appear in MCP input schema."""
         tool = openapi_to_mcp_tool(operation)
-        
+
         if operation.request_body:
             content = operation.request_body.get("content", {})
             json_content = content.get("application/json", {})
             body_schema = json_content.get("schema", {})
             body_props = body_schema.get("properties", {})
-            
+
             for prop_name in body_props:
                 assert prop_name in tool.input_schema.get("properties", {})
 
@@ -689,26 +726,35 @@ class TestOpenAPIToMCPConversionProperty:
     def test_input_schema_is_valid_json_schema(self, operation: OpenAPIOperation):
         """The generated input schema should be valid JSON Schema."""
         tool = openapi_to_mcp_tool(operation)
-        
+
         # Must have type
         assert "type" in tool.input_schema
         assert tool.input_schema["type"] == "object"
-        
+
         # Properties must be a dict
         assert isinstance(tool.input_schema.get("properties", {}), dict)
-        
+
         # Required must be a list if present
         if "required" in tool.input_schema:
             assert isinstance(tool.input_schema["required"], list)
 
     @settings(max_examples=100)
-    @given(operations=st.lists(openapi_operation_strategy(), min_size=1, max_size=5, unique_by=lambda o: o.operation_id))
-    def test_multiple_operations_generate_multiple_tools(self, operations: list[OpenAPIOperation]):
+    @given(
+        operations=st.lists(
+            openapi_operation_strategy(),
+            min_size=1,
+            max_size=5,
+            unique_by=lambda o: o.operation_id,
+        )
+    )
+    def test_multiple_operations_generate_multiple_tools(
+        self, operations: list[OpenAPIOperation]
+    ):
         """Multiple OpenAPI operations should generate multiple MCP tools."""
         tools = [openapi_to_mcp_tool(op) for op in operations]
-        
+
         assert len(tools) == len(operations)
-        
+
         # All tool names should be unique
         tool_names = [t.name for t in tools]
         assert len(tool_names) == len(set(tool_names))
@@ -721,12 +767,17 @@ class TestOpenAPIToMCPConversionProperty:
             path="/api/users",
             summary="Get users",
             parameters=[
-                {"name": "limit", "in": "query", "required": False, "schema": {"type": "integer"}}
+                {
+                    "name": "limit",
+                    "in": "query",
+                    "required": False,
+                    "schema": {"type": "integer"},
+                }
             ],
         )
-        
+
         tool = openapi_to_mcp_tool(operation)
-        
+
         # Should only have the query parameter
         assert "limit" in tool.input_schema.get("properties", {})
         assert len(tool.input_schema.get("properties", {})) == 1
@@ -753,15 +804,14 @@ class TestOpenAPIToMCPConversionProperty:
                 }
             },
         )
-        
+
         tool = openapi_to_mcp_tool(operation)
-        
+
         # Should have request body properties
         assert "name" in tool.input_schema.get("properties", {})
         assert "email" in tool.input_schema.get("properties", {})
         assert "name" in tool.input_schema.get("required", [])
         assert "email" in tool.input_schema.get("required", [])
-
 
 
 # =============================================================================
@@ -863,12 +913,12 @@ class MCPGatewayWithInvocation(MCPGateway):
 class TestMCPToolInvocationProperty:
     """
     Property 27: MCP Tool Invocation
-    
+
     For any registered MCP server with available tools, when a POST request
     is made to `/mcp/tools/call` with a valid tool name and arguments,
     the Gateway should invoke the tool on the MCP server and return the
     tool's response.
-    
+
     Validates: Requirements 8.8
     """
 
@@ -879,7 +929,7 @@ class TestMCPToolInvocationProperty:
         gateway = MCPGatewayWithInvocation()
         gateway.enabled = True
         gateway.register_server(server)
-        
+
         for tool_name in server.tools:
             tool = gateway.get_tool(tool_name)
             assert tool is not None
@@ -892,7 +942,7 @@ class TestMCPToolInvocationProperty:
         gateway = MCPGatewayWithInvocation()
         gateway.enabled = True
         gateway.register_server(server)
-        
+
         for tool_name in server.tools:
             found_server = gateway.find_server_for_tool(tool_name)
             assert found_server is not None
@@ -904,7 +954,7 @@ class TestMCPToolInvocationProperty:
         """Looking up a nonexistent tool should return None."""
         gateway = MCPGatewayWithInvocation()
         gateway.enabled = True
-        
+
         tool = gateway.get_tool(tool_name)
         assert tool is None
 
@@ -916,7 +966,7 @@ class TestMCPToolInvocationProperty:
         gateway = MCPGatewayWithInvocation()
         gateway.enabled = True
         gateway.register_server(server)
-        
+
         for tool_name in server.tools:
             result = await gateway.invoke_tool(tool_name, {})
             assert result.success is True
@@ -930,7 +980,7 @@ class TestMCPToolInvocationProperty:
         """Invoking a nonexistent tool should fail."""
         gateway = MCPGatewayWithInvocation()
         gateway.enabled = True
-        
+
         result = await gateway.invoke_tool(tool_name, {})
         assert result.success is False
         assert result.error is not None
@@ -944,7 +994,7 @@ class TestMCPToolInvocationProperty:
         gateway.enabled = True
         gateway.register_server(server)
         gateway.unregister_server(server.server_id)
-        
+
         for tool_name in server.tools:
             tool = gateway.get_tool(tool_name)
             assert tool is None
@@ -955,17 +1005,17 @@ class TestMCPToolInvocationProperty:
             mcp_server_strategy(),
             min_size=2,
             max_size=3,
-            unique_by=lambda s: s.server_id
+            unique_by=lambda s: s.server_id,
         )
     )
     def test_tools_from_multiple_servers_findable(self, servers: list[MCPServer]):
         """Tools from multiple servers should all be findable."""
         gateway = MCPGatewayWithInvocation()
         gateway.enabled = True
-        
+
         for server in servers:
             gateway.register_server(server)
-        
+
         for server in servers:
             for tool_name in server.tools:
                 tool = gateway.get_tool(tool_name)
@@ -985,7 +1035,7 @@ class TestMCPToolResultProperty:
             tool_name="test_tool",
             server_id="test-server",
         )
-        
+
         assert result.success is True
         assert result.result is not None
         assert result.error is None
@@ -999,7 +1049,7 @@ class TestMCPToolResultProperty:
             error="Tool not found",
             tool_name="missing_tool",
         )
-        
+
         assert result.success is False
         assert result.error is not None
         assert len(result.error) > 0
@@ -1013,9 +1063,8 @@ class TestMCPToolResultProperty:
             result={},
             tool_name=tool_name,
         )
-        
-        assert result.tool_name == tool_name
 
+        assert result.tool_name == tool_name
 
 
 # =============================================================================
@@ -1069,6 +1118,7 @@ class MCPServerRepository:
     async def create(self, server: MCPServerDB) -> MCPServerDB:
         """Create a new server."""
         from datetime import datetime, timezone
+
         now = datetime.now(timezone.utc)
         server.created_at = now
         server.updated_at = now
@@ -1105,6 +1155,7 @@ class MCPServerRepository:
     async def update(self, server_id: str, server: MCPServerDB) -> MCPServerDB | None:
         """Update an existing server."""
         from datetime import datetime, timezone
+
         if server_id not in self._servers:
             return None
         server.updated_at = datetime.now(timezone.utc)
@@ -1135,7 +1186,7 @@ def mcp_server_db_strategy(draw):
     team_id = draw(st.one_of(st.none(), st.text(min_size=1, max_size=10)))
     user_id = draw(st.one_of(st.none(), st.text(min_size=1, max_size=10)))
     is_public = draw(st.booleans())
-    
+
     return MCPServerDB(
         server_id=server_id,
         name=name,
@@ -1154,11 +1205,11 @@ def mcp_server_db_strategy(draw):
 class TestMCPDatabasePersistenceProperty:
     """
     Property 28: MCP Database Persistence
-    
+
     For any MCP server registered when database_url is configured, the server
     and its tools should be persisted to PostgreSQL and should survive Gateway
     restarts, and should be retrievable via the `/v1/mcp/server` endpoint.
-    
+
     Validates: Requirements 8.7
     """
 
@@ -1168,10 +1219,10 @@ class TestMCPDatabasePersistenceProperty:
     async def test_created_server_is_retrievable(self, server: MCPServerDB):
         """A created server should be retrievable by ID."""
         repo = MCPServerRepository()
-        created = await repo.create(server)
-        
+        await repo.create(server)
+
         retrieved = await repo.get(server.server_id)
-        
+
         assert retrieved is not None
         assert retrieved.server_id == server.server_id
         assert retrieved.name == server.name
@@ -1184,23 +1235,30 @@ class TestMCPDatabasePersistenceProperty:
         """A created server should have created_at and updated_at timestamps."""
         repo = MCPServerRepository()
         created = await repo.create(server)
-        
+
         assert created.created_at is not None
         assert created.updated_at is not None
 
     @settings(max_examples=100)
-    @given(servers=st.lists(mcp_server_db_strategy(), min_size=1, max_size=5, unique_by=lambda s: s.server_id))
+    @given(
+        servers=st.lists(
+            mcp_server_db_strategy(),
+            min_size=1,
+            max_size=5,
+            unique_by=lambda s: s.server_id,
+        )
+    )
     @pytest.mark.asyncio
     async def test_all_created_servers_in_list(self, servers: list[MCPServerDB]):
         """All created servers should appear in the list."""
         repo = MCPServerRepository()
         for server in servers:
             await repo.create(server)
-        
+
         listed = await repo.list_all()
         listed_ids = {s.server_id for s in listed}
         expected_ids = {s.server_id for s in servers}
-        
+
         assert expected_ids == listed_ids
 
     @settings(max_examples=100)
@@ -1211,9 +1269,9 @@ class TestMCPDatabasePersistenceProperty:
         repo = MCPServerRepository()
         await repo.create(server)
         await repo.delete(server.server_id)
-        
+
         retrieved = await repo.get(server.server_id)
-        
+
         assert retrieved is None
 
     @settings(max_examples=100)
@@ -1223,7 +1281,7 @@ class TestMCPDatabasePersistenceProperty:
         """Deleting a nonexistent server should return False."""
         repo = MCPServerRepository()
         result = await repo.delete(server_id)
-        
+
         assert result is False
 
     @settings(max_examples=100)
@@ -1233,9 +1291,9 @@ class TestMCPDatabasePersistenceProperty:
         """Server should be serializable to dict and back."""
         repo = MCPServerRepository()
         created = await repo.create(server)
-        
+
         as_dict = created.to_dict()
-        
+
         assert as_dict["server_id"] == server.server_id
         assert as_dict["name"] == server.name
         assert as_dict["url"] == server.url
@@ -1251,11 +1309,11 @@ class TestMCPDatabasePersistenceProperty:
         repo = MCPServerRepository()
         created = await repo.create(server)
         original_created_at = created.created_at
-        
+
         # Update the server
         server.name = "Updated Name"
         updated = await repo.update(server.server_id, server)
-        
+
         assert updated is not None
         assert updated.created_at == original_created_at
 
@@ -1266,7 +1324,7 @@ class TestMCPDatabasePersistenceProperty:
         """Updating a nonexistent server should return None."""
         repo = MCPServerRepository()
         result = await repo.update(server.server_id, server)
-        
+
         assert result is None
 
 
@@ -1282,11 +1340,11 @@ class TestMCPServerFilteringProperty:
         server.user_id = "test-user"
         server.is_public = False
         await repo.create(server)
-        
+
         # Filter by matching user
         results = await repo.list_all(user_id="test-user", include_public=False)
         assert any(s.server_id == server.server_id for s in results)
-        
+
         # Filter by non-matching user
         results = await repo.list_all(user_id="other-user", include_public=False)
         assert not any(s.server_id == server.server_id for s in results)
@@ -1300,11 +1358,11 @@ class TestMCPServerFilteringProperty:
         server.team_id = "test-team"
         server.is_public = False
         await repo.create(server)
-        
+
         # Filter by matching team
         results = await repo.list_all(team_id="test-team", include_public=False)
         assert any(s.server_id == server.server_id for s in results)
-        
+
         # Filter by non-matching team
         results = await repo.list_all(team_id="other-team", include_public=False)
         assert not any(s.server_id == server.server_id for s in results)
@@ -1317,7 +1375,7 @@ class TestMCPServerFilteringProperty:
         repo = MCPServerRepository()
         server.is_public = True
         await repo.create(server)
-        
+
         # Should be included with include_public=True
         results = await repo.list_all(include_public=True)
         assert any(s.server_id == server.server_id for s in results)
@@ -1332,15 +1390,12 @@ class TestMCPServerFilteringProperty:
         server.user_id = None
         server.team_id = None
         await repo.create(server)
-        
+
         # Should be excluded with include_public=False and non-matching filters
         results = await repo.list_all(
-            user_id="other-user",
-            team_id="other-team",
-            include_public=False
+            user_id="other-user", team_id="other-team", include_public=False
         )
         assert not any(s.server_id == server.server_id for s in results)
-
 
 
 # =============================================================================
@@ -1360,7 +1415,7 @@ class MCPGatewayWithHealth(MCPGatewayWithInvocation):
                 "status": "not_found",
                 "error": f"Server {server_id} not found",
             }
-        
+
         # Simulate health check
         if server.url and server.url.startswith(("http://", "https://")):
             return {
@@ -1393,11 +1448,11 @@ class MCPGatewayWithHealth(MCPGatewayWithInvocation):
 class TestMCPServerHealthCheckProperty:
     """
     Property 30: MCP Server Health Check
-    
+
     For any registered MCP server, when a GET request is made to
     `/v1/mcp/server/health`, the Gateway should check connectivity
     to the server and return the health status for each server.
-    
+
     Validates: Requirements 8.13
     """
 
@@ -1409,9 +1464,9 @@ class TestMCPServerHealthCheckProperty:
         gateway = MCPGatewayWithHealth()
         gateway.enabled = True
         gateway.register_server(server)
-        
+
         health = await gateway.check_server_health(server.server_id)
-        
+
         assert "status" in health
         assert health["status"] in ["healthy", "unhealthy"]
 
@@ -1423,9 +1478,9 @@ class TestMCPServerHealthCheckProperty:
         gateway = MCPGatewayWithHealth()
         gateway.enabled = True
         gateway.register_server(server)
-        
+
         health = await gateway.check_server_health(server.server_id)
-        
+
         assert health["server_id"] == server.server_id
         if health["status"] == "healthy":
             assert health["name"] == server.name
@@ -1438,14 +1493,21 @@ class TestMCPServerHealthCheckProperty:
         """Health check for nonexistent server should return not_found status."""
         gateway = MCPGatewayWithHealth()
         gateway.enabled = True
-        
+
         health = await gateway.check_server_health(server_id)
-        
+
         assert health["status"] == "not_found"
         assert "error" in health
 
     @settings(max_examples=100, suppress_health_check=[HealthCheck.too_slow])
-    @given(servers=st.lists(mcp_server_strategy(), min_size=1, max_size=3, unique_by=lambda s: s.server_id))
+    @given(
+        servers=st.lists(
+            mcp_server_strategy(),
+            min_size=1,
+            max_size=3,
+            unique_by=lambda s: s.server_id,
+        )
+    )
     @pytest.mark.asyncio
     async def test_check_all_servers_returns_all(self, servers: list[MCPServer]):
         """Check all servers should return health for all registered servers."""
@@ -1453,9 +1515,9 @@ class TestMCPServerHealthCheckProperty:
         gateway.enabled = True
         for server in servers:
             gateway.register_server(server)
-        
+
         health_results = await gateway.check_all_servers_health()
-        
+
         assert len(health_results) == len(servers)
         result_ids = {h["server_id"] for h in health_results}
         expected_ids = {s.server_id for s in servers}
@@ -1469,9 +1531,9 @@ class TestMCPServerHealthCheckProperty:
         gateway = MCPGatewayWithHealth()
         gateway.enabled = True
         gateway.register_server(server)
-        
+
         health = await gateway.check_server_health(server.server_id)
-        
+
         if health["status"] == "healthy":
             assert health["tool_count"] == len(server.tools)
             assert health["resource_count"] == len(server.resources)
@@ -1494,17 +1556,19 @@ class MCPGatewayWithRegistry(MCPGatewayWithHealth):
                 server_groups = server.metadata.get("access_groups", [])
                 if not any(g in server_groups for g in access_groups):
                     continue
-            
-            servers_list.append({
-                "id": server.server_id,
-                "name": server.name,
-                "url": server.url,
-                "transport": server.transport.value,
-                "tools": server.tools,
-                "resources": server.resources,
-                "auth_type": server.auth_type,
-            })
-        
+
+            servers_list.append(
+                {
+                    "id": server.server_id,
+                    "name": server.name,
+                    "url": server.url,
+                    "transport": server.transport.value,
+                    "tools": server.tools,
+                    "resources": server.resources,
+                    "auth_type": server.auth_type,
+                }
+            )
+
         return {
             "version": "1.0",
             "servers": servers_list,
@@ -1515,25 +1579,32 @@ class MCPGatewayWithRegistry(MCPGatewayWithHealth):
 class TestMCPRegistryDiscoveryProperty:
     """
     Property 31: MCP Registry Discovery
-    
+
     For any set of registered MCP servers, the `/v1/mcp/registry.json`
     endpoint should return a valid MCP registry document listing all
     servers and their capabilities for client discovery.
-    
+
     Validates: Requirements 8.12
     """
 
     @settings(max_examples=100, suppress_health_check=[HealthCheck.too_slow])
-    @given(servers=st.lists(mcp_server_strategy(), min_size=1, max_size=5, unique_by=lambda s: s.server_id))
+    @given(
+        servers=st.lists(
+            mcp_server_strategy(),
+            min_size=1,
+            max_size=5,
+            unique_by=lambda s: s.server_id,
+        )
+    )
     def test_registry_lists_all_servers(self, servers: list[MCPServer]):
         """Registry should list all registered servers."""
         gateway = MCPGatewayWithRegistry()
         gateway.enabled = True
         for server in servers:
             gateway.register_server(server)
-        
+
         registry = gateway.get_registry()
-        
+
         assert registry["server_count"] == len(servers)
         assert len(registry["servers"]) == len(servers)
 
@@ -1544,9 +1615,9 @@ class TestMCPRegistryDiscoveryProperty:
         gateway = MCPGatewayWithRegistry()
         gateway.enabled = True
         gateway.register_server(server)
-        
+
         registry = gateway.get_registry()
-        
+
         assert len(registry["servers"]) == 1
         server_entry = registry["servers"][0]
         assert server_entry["id"] == server.server_id
@@ -1559,9 +1630,9 @@ class TestMCPRegistryDiscoveryProperty:
         """Registry should include a version field."""
         gateway = MCPGatewayWithRegistry()
         gateway.enabled = True
-        
+
         registry = gateway.get_registry()
-        
+
         assert "version" in registry
         assert registry["version"] == "1.0"
 
@@ -1569,9 +1640,9 @@ class TestMCPRegistryDiscoveryProperty:
         """Empty gateway should return empty registry."""
         gateway = MCPGatewayWithRegistry()
         gateway.enabled = True
-        
+
         registry = gateway.get_registry()
-        
+
         assert registry["server_count"] == 0
         assert registry["servers"] == []
 
@@ -1581,15 +1652,15 @@ class TestMCPRegistryDiscoveryProperty:
         """Registry should filter by access groups when specified."""
         gateway = MCPGatewayWithRegistry()
         gateway.enabled = True
-        
+
         # Add server with access groups
         server.metadata["access_groups"] = ["group-a", "group-b"]
         gateway.register_server(server)
-        
+
         # Filter by matching group
         registry = gateway.get_registry(access_groups=["group-a"])
         assert len(registry["servers"]) == 1
-        
+
         # Filter by non-matching group
         registry = gateway.get_registry(access_groups=["group-c"])
         assert len(registry["servers"]) == 0
@@ -1601,7 +1672,7 @@ class TestMCPRegistryDiscoveryProperty:
         gateway = MCPGatewayWithRegistry()
         gateway.enabled = True
         gateway.register_server(server)
-        
+
         registry = gateway.get_registry(access_groups=None)
-        
+
         assert len(registry["servers"]) == 1

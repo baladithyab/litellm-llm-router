@@ -11,32 +11,17 @@ Tests for the observability module including:
 """
 
 import os
-import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-# Mock all external dependencies before importing
-sys.modules["litellm"] = MagicMock()
-sys.modules["litellm._logging"] = MagicMock()
-sys.modules["litellm.proxy"] = MagicMock()
-sys.modules["litellm.proxy.proxy_server"] = MagicMock()
-sys.modules["fastapi"] = MagicMock()
-sys.modules["pydantic"] = MagicMock()
+# NOTE: We don't mock modules at the top level because it pollutes sys.modules
+# and corrupts other tests that run later in the suite.
+# The observability module is loaded directly via importlib.util to avoid
+# importing the full litellm_llmrouter package which has heavy dependencies.
 
-# Mock OTLP exporter modules (not available in test environment)
-sys.modules["opentelemetry.exporter"] = MagicMock()
-sys.modules["opentelemetry.exporter.otlp"] = MagicMock()
-sys.modules["opentelemetry.exporter.otlp.proto"] = MagicMock()
-sys.modules["opentelemetry.exporter.otlp.proto.grpc"] = MagicMock()
-sys.modules["opentelemetry.exporter.otlp.proto.grpc._log_exporter"] = MagicMock()
-sys.modules["opentelemetry.exporter.otlp.proto.grpc.trace_exporter"] = MagicMock()
-sys.modules["opentelemetry.exporter.otlp.proto.grpc.metric_exporter"] = MagicMock()
-sys.modules["opentelemetry.instrumentation"] = MagicMock()
-sys.modules["opentelemetry.instrumentation.logging"] = MagicMock()
-
-from opentelemetry import trace  # noqa: E402
-from opentelemetry.sdk.trace import TracerProvider  # noqa: E402
+from opentelemetry import trace
+from opentelemetry.sdk.trace import TracerProvider
 
 
 # Import the module under test directly (not through __init__.py)

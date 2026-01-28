@@ -11,17 +11,14 @@ import pytest
 
 # Check if litellm is available
 try:
-    import importlib.util
+    import litellm  # noqa: F401
 
-    LITELLM_AVAILABLE = importlib.util.find_spec("litellm") is not None
-except ImportError:
+    LITELLM_AVAILABLE = True
+except (ImportError, ValueError):
     LITELLM_AVAILABLE = False
 
-pytestmark = pytest.mark.skipif(
-    not LITELLM_AVAILABLE, reason="litellm package not installed"
-)
 
-
+@pytest.mark.skipif(not LITELLM_AVAILABLE, reason="litellm package not installed")
 class TestRoutingStrategyPatch:
     """Test the routing strategy patch module."""
 
