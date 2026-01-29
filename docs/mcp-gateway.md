@@ -339,6 +339,26 @@ flowchart TB
 | `MCP_SYNC_INTERVAL` | `5` | Seconds between Redis sync checks |
 | `STORE_MODEL_IN_DB` | `false` | Persist servers in database (HA mode) |
 
+## Security: SSRF Protection
+
+MCP server URLs are validated against SSRF attacks before registration and invocation.
+
+**Default behavior (secure-by-default):**
+- Private IPs (10.x, 172.16.x, 192.168.x) are **blocked**
+- Loopback (127.0.0.1) and metadata endpoints (169.254.169.254) are **always blocked**
+
+**To allow internal MCP servers**, configure allowlists:
+
+```bash
+# Allow specific internal hosts
+LLMROUTER_SSRF_ALLOWLIST_HOSTS=mcp.internal,.trusted-corp.com
+
+# Allow specific IP ranges (CIDR notation)
+LLMROUTER_SSRF_ALLOWLIST_CIDRS=10.100.0.0/16
+```
+
+See [Security Guide](security.md#ssrf-protection) for full details.
+
 ## HA Sync (High Availability)
 
 When running multiple LiteLLM replicas behind a load balancer, MCP server registrations

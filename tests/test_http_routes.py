@@ -3,13 +3,17 @@ HTTP-level tests for LLMRouter routes.
 
 These tests verify:
 1. Probe endpoints (/_health/live, /_health/ready) are unauthenticated
-2. Custom routes (llmrouter_router) require authentication
+2. Custom routes (llmrouter_router) require user API key authentication
+3. Admin routes (admin_router) require admin API key authentication
+4. Error responses are sanitized and include request_id
+5. Request correlation IDs are passed through
 
 Uses FastAPI TestClient against minimal app fixtures.
 """
 
 import os
 import pytest
+import uuid
 
 # Check if litellm is available
 try:
@@ -240,3 +244,513 @@ class TestConfigSyncStatusResponse:
         # These should be present (even if None when not configured)
         assert "s3" in status or status.get("s3") is None
         assert "gcs" in status or status.get("gcs") is None
+
+
+# =============================================================================
+# Admin Auth Tests
+# =============================================================================
+
+
+@pytest.fixture
+def app_with_admin_router():
+    """Create a minimal FastAPI app with admin-protected routes."""
+    from fastapi import Depends, HTTPException, Request, APIRouter
+    from litellm_llmrouter.routes import health_router
+    from litellm_llmrouter.auth import admin_api_key_auth, RequestIDMiddleware
+
+    # Create admin router with mock responses
+    admin_router = APIRouter(
+        tags=["admin-test"],
+        dependencies=[Depends(admin_api_key_auth)],
+    )
+
+    @admin_router.post("/router/reload")
+    async def reload_router():
+        """Reload router - requires admin auth."""
+        return {"status": "reloaded"}
+
+    @admin_router.post("/config/reload")
+    async def reload_config():
+        """Reload config - requires admin auth."""
+        return {"status": "reloaded"}
+
+    @admin_router.post("/llmrouter/mcp/servers")
+    async def register_mcp_server():
+        """Register MCP server - requires admin auth."""
+        return {"status": "registered", "server_id": "test"}
+
+    @admin_router.post("/a2a/agents")
+    async def register_agent():
+        """Register agent - requires admin auth."""
+        return {"status": "registered", "agent_id": "test"}
+
+    app = FastAPI()
+    app.add_middleware(RequestIDMiddleware)
+    app.include_router(health_router)
+    app.include_router(admin_router)
+    return app
+
+
+class TestAdminAuthEndpoints:
+    """Test that control-plane endpoints require admin API key authentication."""
+
+    def test_router_reload_requires_admin_key(self, app_with_admin_router):
+        """Test POST /router/reload returns 401 without admin API key."""
+        # Clear any existing admin keys
+        env_backup = {
+            "ADMIN_API_KEYS": os.environ.pop("ADMIN_API_KEYS", None),
+            "ADMIN_API_KEY": os.environ.pop("ADMIN_API_KEY", None),
+            "ADMIN_AUTH_ENABLED": os.environ.pop("ADMIN_AUTH_ENABLED", None),
+        }
+
+        try:
+            # Set a test admin key
+            os.environ["ADMIN_API_KEYS"] = "test-admin-key-123"
+
+            client = TestClient(app_with_admin_router, raise_server_exceptions=False)
+            response = client.post("/router/reload")
+
+            assert response.status_code == 401
+            data = response.json()["detail"]
+            assert data["error"] == "admin_key_required"
+            assert "request_id" in data
+        finally:
+            for key, val in env_backup.items():
+                if val is not None:
+                    os.environ[key] = val
+                elif key in os.environ:
+                    del os.environ[key]
+
+    def test_router_reload_rejects_invalid_admin_key(self, app_with_admin_router):
+        """Test POST /router/reload returns 401 with invalid admin API key."""
+        env_backup = {
+            "ADMIN_API_KEYS": os.environ.pop("ADMIN_API_KEYS", None),
+            "ADMIN_API_KEY": os.environ.pop("ADMIN_API_KEY", None),
+            "ADMIN_AUTH_ENABLED": os.environ.pop("ADMIN_AUTH_ENABLED", None),
+        }
+
+        try:
+            os.environ["ADMIN_API_KEYS"] = "correct-admin-key"
+
+            client = TestClient(app_with_admin_router, raise_server_exceptions=False)
+            response = client.post(
+                "/router/reload",
+                headers={"X-Admin-API-Key": "wrong-admin-key"},
+            )
+
+            assert response.status_code == 401
+            data = response.json()["detail"]
+            assert data["error"] == "invalid_admin_key"
+            assert "request_id" in data
+        finally:
+            for key, val in env_backup.items():
+                if val is not None:
+                    os.environ[key] = val
+                elif key in os.environ:
+                    del os.environ[key]
+
+    def test_router_reload_accepts_valid_admin_key_header(self, app_with_admin_router):
+        """Test POST /router/reload returns 200 with valid X-Admin-API-Key header."""
+        env_backup = {
+            "ADMIN_API_KEYS": os.environ.pop("ADMIN_API_KEYS", None),
+            "ADMIN_API_KEY": os.environ.pop("ADMIN_API_KEY", None),
+            "ADMIN_AUTH_ENABLED": os.environ.pop("ADMIN_AUTH_ENABLED", None),
+        }
+
+        try:
+            os.environ["ADMIN_API_KEYS"] = "test-admin-key-123"
+
+            client = TestClient(app_with_admin_router)
+            response = client.post(
+                "/router/reload",
+                headers={"X-Admin-API-Key": "test-admin-key-123"},
+            )
+
+            assert response.status_code == 200
+            data = response.json()
+            assert data["status"] == "reloaded"
+        finally:
+            for key, val in env_backup.items():
+                if val is not None:
+                    os.environ[key] = val
+                elif key in os.environ:
+                    del os.environ[key]
+
+    def test_router_reload_accepts_admin_key_via_bearer(self, app_with_admin_router):
+        """Test POST /router/reload accepts admin key via Authorization: Bearer header."""
+        env_backup = {
+            "ADMIN_API_KEYS": os.environ.pop("ADMIN_API_KEYS", None),
+            "ADMIN_API_KEY": os.environ.pop("ADMIN_API_KEY", None),
+            "ADMIN_AUTH_ENABLED": os.environ.pop("ADMIN_AUTH_ENABLED", None),
+        }
+
+        try:
+            os.environ["ADMIN_API_KEYS"] = "test-admin-key-456"
+
+            client = TestClient(app_with_admin_router)
+            response = client.post(
+                "/router/reload",
+                headers={"Authorization": "Bearer test-admin-key-456"},
+            )
+
+            assert response.status_code == 200
+        finally:
+            for key, val in env_backup.items():
+                if val is not None:
+                    os.environ[key] = val
+                elif key in os.environ:
+                    del os.environ[key]
+
+    def test_admin_auth_denies_when_not_configured(self, app_with_admin_router):
+        """Test control-plane returns 403 when no admin keys are configured (fail-closed)."""
+        env_backup = {
+            "ADMIN_API_KEYS": os.environ.pop("ADMIN_API_KEYS", None),
+            "ADMIN_API_KEY": os.environ.pop("ADMIN_API_KEY", None),
+            "ADMIN_AUTH_ENABLED": os.environ.pop("ADMIN_AUTH_ENABLED", None),
+        }
+
+        try:
+            # No admin keys configured - should fail closed
+            client = TestClient(app_with_admin_router, raise_server_exceptions=False)
+            response = client.post(
+                "/router/reload",
+                headers={"X-Admin-API-Key": "any-key"},
+            )
+
+            assert response.status_code == 403
+            data = response.json()["detail"]
+            assert data["error"] == "control_plane_not_configured"
+            assert "request_id" in data
+        finally:
+            for key, val in env_backup.items():
+                if val is not None:
+                    os.environ[key] = val
+
+    def test_mcp_server_registration_requires_admin_key(self, app_with_admin_router):
+        """Test POST /llmrouter/mcp/servers returns 401 without admin API key."""
+        env_backup = {
+            "ADMIN_API_KEYS": os.environ.pop("ADMIN_API_KEYS", None),
+            "ADMIN_API_KEY": os.environ.pop("ADMIN_API_KEY", None),
+            "ADMIN_AUTH_ENABLED": os.environ.pop("ADMIN_AUTH_ENABLED", None),
+        }
+
+        try:
+            os.environ["ADMIN_API_KEYS"] = "test-admin-key"
+
+            client = TestClient(app_with_admin_router, raise_server_exceptions=False)
+            response = client.post("/llmrouter/mcp/servers")
+
+            assert response.status_code == 401
+        finally:
+            for key, val in env_backup.items():
+                if val is not None:
+                    os.environ[key] = val
+                elif key in os.environ:
+                    del os.environ[key]
+
+    def test_a2a_agent_registration_requires_admin_key(self, app_with_admin_router):
+        """Test POST /a2a/agents returns 401 without admin API key."""
+        env_backup = {
+            "ADMIN_API_KEYS": os.environ.pop("ADMIN_API_KEYS", None),
+            "ADMIN_API_KEY": os.environ.pop("ADMIN_API_KEY", None),
+            "ADMIN_AUTH_ENABLED": os.environ.pop("ADMIN_AUTH_ENABLED", None),
+        }
+
+        try:
+            os.environ["ADMIN_API_KEYS"] = "test-admin-key"
+
+            client = TestClient(app_with_admin_router, raise_server_exceptions=False)
+            response = client.post("/a2a/agents")
+
+            assert response.status_code == 401
+        finally:
+            for key, val in env_backup.items():
+                if val is not None:
+                    os.environ[key] = val
+                elif key in os.environ:
+                    del os.environ[key]
+
+    def test_multiple_admin_keys_supported(self, app_with_admin_router):
+        """Test that multiple admin keys (comma-separated) are all accepted."""
+        env_backup = {
+            "ADMIN_API_KEYS": os.environ.pop("ADMIN_API_KEYS", None),
+            "ADMIN_API_KEY": os.environ.pop("ADMIN_API_KEY", None),
+            "ADMIN_AUTH_ENABLED": os.environ.pop("ADMIN_AUTH_ENABLED", None),
+        }
+
+        try:
+            os.environ["ADMIN_API_KEYS"] = "key1,key2,key3"
+
+            client = TestClient(app_with_admin_router)
+
+            # All three keys should work
+            for key in ["key1", "key2", "key3"]:
+                response = client.post(
+                    "/router/reload",
+                    headers={"X-Admin-API-Key": key},
+                )
+                assert response.status_code == 200
+        finally:
+            for key, val in env_backup.items():
+                if val is not None:
+                    os.environ[key] = val
+                elif key in os.environ:
+                    del os.environ[key]
+
+
+class TestRequestCorrelationID:
+    """Test request correlation ID middleware."""
+
+    def test_request_id_passthrough(self, app_with_admin_router):
+        """Test that X-Request-ID header is passed through to response."""
+        env_backup = {
+            "ADMIN_API_KEYS": os.environ.pop("ADMIN_API_KEYS", None),
+            "DATABASE_URL": os.environ.pop("DATABASE_URL", None),
+            "REDIS_HOST": os.environ.pop("REDIS_HOST", None),
+            "MCP_GATEWAY_ENABLED": os.environ.pop("MCP_GATEWAY_ENABLED", None),
+        }
+
+        try:
+            custom_id = "my-custom-request-id-12345"
+            client = TestClient(app_with_admin_router)
+            response = client.get(
+                "/_health/live",
+                headers={"X-Request-ID": custom_id},
+            )
+
+            assert response.status_code == 200
+            assert response.headers.get("X-Request-ID") == custom_id
+        finally:
+            for key, val in env_backup.items():
+                if val is not None:
+                    os.environ[key] = val
+
+    def test_request_id_generated_when_not_provided(self, app_with_admin_router):
+        """Test that X-Request-ID is generated when not provided."""
+        env_backup = {
+            "DATABASE_URL": os.environ.pop("DATABASE_URL", None),
+            "REDIS_HOST": os.environ.pop("REDIS_HOST", None),
+            "MCP_GATEWAY_ENABLED": os.environ.pop("MCP_GATEWAY_ENABLED", None),
+        }
+
+        try:
+            client = TestClient(app_with_admin_router)
+            response = client.get("/_health/live")
+
+            assert response.status_code == 200
+            request_id = response.headers.get("X-Request-ID")
+            assert request_id is not None
+            # Should be a valid UUID
+            uuid.UUID(request_id)
+        finally:
+            for key, val in env_backup.items():
+                if val is not None:
+                    os.environ[key] = val
+
+    def test_request_id_in_error_response(self, app_with_admin_router):
+        """Test that request_id is included in error response bodies."""
+        env_backup = {
+            "ADMIN_API_KEYS": os.environ.pop("ADMIN_API_KEYS", None),
+            "ADMIN_API_KEY": os.environ.pop("ADMIN_API_KEY", None),
+            "ADMIN_AUTH_ENABLED": os.environ.pop("ADMIN_AUTH_ENABLED", None),
+        }
+
+        try:
+            os.environ["ADMIN_API_KEYS"] = "correct-key"
+            custom_id = "error-test-request-id"
+
+            client = TestClient(app_with_admin_router, raise_server_exceptions=False)
+            response = client.post(
+                "/router/reload",
+                headers={
+                    "X-Request-ID": custom_id,
+                    "X-Admin-API-Key": "wrong-key",
+                },
+            )
+
+            assert response.status_code == 401
+            data = response.json()["detail"]
+            assert data["request_id"] == custom_id
+        finally:
+            for key, val in env_backup.items():
+                if val is not None:
+                    os.environ[key] = val
+                elif key in os.environ:
+                    del os.environ[key]
+
+
+class TestReadinessErrorSanitization:
+    """Test that readiness probe errors are sanitized."""
+
+    def test_readiness_does_not_leak_exception_text(self, app_with_health_router):
+        """Test /_health/ready does not leak raw exception messages."""
+        from litellm_llmrouter.auth import RequestIDMiddleware
+
+        # Add middleware to the app
+        app_with_health_router.add_middleware(RequestIDMiddleware)
+
+        # Configure a database URL that will fail
+        env_backup = {
+            "DATABASE_URL": os.environ.pop("DATABASE_URL", None),
+            "REDIS_HOST": os.environ.pop("REDIS_HOST", None),
+            "MCP_GATEWAY_ENABLED": os.environ.pop("MCP_GATEWAY_ENABLED", None),
+        }
+
+        try:
+            # Set an invalid database URL that will cause connection to fail
+            os.environ["DATABASE_URL"] = "postgresql://invalid:invalid@localhost:5432/invalid"
+
+            client = TestClient(app_with_health_router, raise_server_exceptions=False)
+            response = client.get("/_health/ready")
+
+            # Response could be 200 (if asyncpg not installed, check is skipped) 
+            # or 503 (if asyncpg installed and connection fails)
+            assert response.status_code in (200, 503)
+
+            if response.status_code == 503:
+                data = response.json()["detail"]
+
+                # Check that error is sanitized - should not contain connection details
+                if "database" in data.get("checks", {}):
+                    db_check = data["checks"]["database"]
+                    error_msg = db_check.get("error", "")
+                    # Should be generic error, not the full exception
+                    assert "connection failed" in error_msg or "connection timeout" in error_msg
+                    # Should not contain stack traces or connection strings
+                    assert "traceback" not in error_msg.lower()
+                    assert "password" not in error_msg.lower()
+                    assert "invalid:invalid" not in error_msg
+
+                # Should include request_id
+                assert "request_id" in data
+            else:
+                # 200 OK - check structure is correct
+                data = response.json()
+                assert "request_id" in data
+                # Database check should be skipped (asyncpg not installed)
+                if "database" in data.get("checks", {}):
+                    assert data["checks"]["database"]["status"] == "skipped"
+        finally:
+            for key, val in env_backup.items():
+                if val is not None:
+                    os.environ[key] = val
+                elif key in os.environ:
+                    del os.environ[key]
+
+    def test_readiness_includes_request_id(self, app_with_health_router):
+        """Test /_health/ready includes request_id in response."""
+        from litellm_llmrouter.auth import RequestIDMiddleware
+
+        app_with_health_router.add_middleware(RequestIDMiddleware)
+
+        env_backup = {
+            "DATABASE_URL": os.environ.pop("DATABASE_URL", None),
+            "REDIS_HOST": os.environ.pop("REDIS_HOST", None),
+            "MCP_GATEWAY_ENABLED": os.environ.pop("MCP_GATEWAY_ENABLED", None),
+        }
+
+        try:
+            client = TestClient(app_with_health_router)
+            response = client.get("/_health/ready")
+
+            assert response.status_code == 200
+            data = response.json()
+            assert "request_id" in data
+        finally:
+            for key, val in env_backup.items():
+                if val is not None:
+                    os.environ[key] = val
+
+
+class TestAdminAuthUnit:
+    """Unit tests for admin auth module."""
+
+    def test_load_admin_api_keys_from_list(self):
+        """Test loading admin keys from ADMIN_API_KEYS env var."""
+        from litellm_llmrouter.auth import _load_admin_api_keys
+
+        env_backup = {
+            "ADMIN_API_KEYS": os.environ.pop("ADMIN_API_KEYS", None),
+            "ADMIN_API_KEY": os.environ.pop("ADMIN_API_KEY", None),
+        }
+
+        try:
+            os.environ["ADMIN_API_KEYS"] = "key1, key2 , key3"
+            keys = _load_admin_api_keys()
+
+            assert keys == {"key1", "key2", "key3"}
+        finally:
+            for key, val in env_backup.items():
+                if val is not None:
+                    os.environ[key] = val
+                elif key in os.environ:
+                    del os.environ[key]
+
+    def test_load_admin_api_keys_fallback_to_single(self):
+        """Test fallback to ADMIN_API_KEY when ADMIN_API_KEYS not set."""
+        from litellm_llmrouter.auth import _load_admin_api_keys
+
+        env_backup = {
+            "ADMIN_API_KEYS": os.environ.pop("ADMIN_API_KEYS", None),
+            "ADMIN_API_KEY": os.environ.pop("ADMIN_API_KEY", None),
+        }
+
+        try:
+            os.environ["ADMIN_API_KEY"] = "single-key"
+            keys = _load_admin_api_keys()
+
+            assert keys == {"single-key"}
+        finally:
+            for key, val in env_backup.items():
+                if val is not None:
+                    os.environ[key] = val
+                elif key in os.environ:
+                    del os.environ[key]
+
+    def test_is_admin_auth_enabled_default_true(self):
+        """Test that admin auth is enabled by default."""
+        from litellm_llmrouter.auth import _is_admin_auth_enabled
+
+        env_backup = {
+            "ADMIN_AUTH_ENABLED": os.environ.pop("ADMIN_AUTH_ENABLED", None),
+        }
+
+        try:
+            assert _is_admin_auth_enabled() is True
+        finally:
+            for key, val in env_backup.items():
+                if val is not None:
+                    os.environ[key] = val
+
+    def test_is_admin_auth_enabled_can_be_disabled(self):
+        """Test that admin auth can be disabled via env var."""
+        from litellm_llmrouter.auth import _is_admin_auth_enabled
+
+        env_backup = {
+            "ADMIN_AUTH_ENABLED": os.environ.pop("ADMIN_AUTH_ENABLED", None),
+        }
+
+        try:
+            for disable_value in ["false", "False", "FALSE", "0", "no", "off"]:
+                os.environ["ADMIN_AUTH_ENABLED"] = disable_value
+                assert _is_admin_auth_enabled() is False, f"Failed for value: {disable_value}"
+        finally:
+            for key, val in env_backup.items():
+                if val is not None:
+                    os.environ[key] = val
+                elif key in os.environ:
+                    del os.environ[key]
+
+    def test_sanitize_error_response(self):
+        """Test that sanitize_error_response produces correct structure."""
+        from litellm_llmrouter.auth import sanitize_error_response
+
+        error = Exception("Sensitive database connection string: postgres://user:pass@host")
+        result = sanitize_error_response(error, "test-req-id", "Generic error message")
+
+        assert result["error"] == "internal_error"
+        assert result["message"] == "Generic error message"
+        assert result["request_id"] == "test-req-id"
+        # Should NOT contain the sensitive info
+        assert "postgres" not in str(result)
+        assert "user:pass" not in str(result)
