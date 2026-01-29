@@ -154,6 +154,10 @@ curl -X GET http://localhost:8080/llmrouter/mcp/resources \
 
 ### Call a Tool
 
+**Note:** Remote tool invocation is **disabled by default** for security. When disabled, this endpoint returns HTTP 501 (Not Implemented).
+
+To enable tool invocation, set `LLMROUTER_ENABLE_MCP_TOOL_INVOCATION=true` after configuring appropriate SSRF protections.
+
 ```bash
 curl -X POST http://localhost:8080/llmrouter/mcp/tools/call \
   -H "Authorization: Bearer <master_key>" \
@@ -166,22 +170,33 @@ curl -X POST http://localhost:8080/llmrouter/mcp/tools/call \
   }'
 ```
 
-**Response (200 OK):**
+**Response (when enabled, 200 OK):**
 ```json
 {
   "status": "success",
   "tool_name": "search",
   "server_id": "my-mcp-server",
   "result": {
-    "message": "Tool search invoked successfully"
+    "data": "..."
   }
+}
+```
+
+**Response (when disabled, 501 Not Implemented):**
+```json
+{
+  "error": "tool_invocation_disabled",
+  "message": "Remote tool invocation is disabled. Enable via LLMROUTER_ENABLE_MCP_TOOL_INVOCATION=true",
+  "request_id": "abc123"
 }
 ```
 
 **Error Response (404 Not Found):**
 ```json
 {
-  "detail": "Tool 'unknown-tool' not found"
+  "error": "tool_not_found",
+  "message": "Tool 'unknown-tool' not found",
+  "request_id": "abc123"
 }
 ```
 
@@ -334,6 +349,7 @@ flowchart TB
 | Environment Variable | Default | Description |
 |---------------------|---------|-------------|
 | `MCP_GATEWAY_ENABLED` | `false` | Enable MCP gateway REST endpoints |
+| `LLMROUTER_ENABLE_MCP_TOOL_INVOCATION` | `false` | **Security-sensitive.** Enable remote HTTP calls to MCP servers for tool invocation. When `false`, `/llmrouter/mcp/tools/call` returns 501. |
 | `MCP_TRACING_ENABLED` | `true` | Enable OTel tracing for MCP operations |
 | `MCP_HA_SYNC_ENABLED` | `true` | Enable Redis-backed HA sync for MCP servers |
 | `MCP_SYNC_INTERVAL` | `5` | Seconds between Redis sync checks |
@@ -425,14 +441,148 @@ All error responses use consistent JSON format:
 
 ```json
 {
-  "detail": "Error message describing what went wrong"
+  "error": "error_code",
+  "message": "Error message describing what went wrong",
+  "request_id": "correlation-id"
 }
 ```
 
 Common HTTP status codes:
 - `404` - Server/tool not found, or MCP gateway disabled
-- `400` - Invalid request payload
+- `400` - Invalid request payload or tool invocation failed
 - `500` - Internal server error
+- `501` - Tool invocation disabled (set `LLMROUTER_ENABLE_MCP_TOOL_INVOCATION=true` to enable)
+
+## LiteLLM API Parity (Upstream-Compatible Endpoints)
+
+RouteIQ Gateway provides upstream-compatible endpoint aliases that match LiteLLM's native MCP API paths. This enables clients built for LiteLLM to work seamlessly with RouteIQ Gateway.
+
+### Parity Endpoint Aliases
+
+| Upstream LiteLLM Path | RouteIQ Alias | Description |
+|----------------------|---------------|-------------|
+| `GET /v1/mcp/server` | ✅ Supported | List all configured MCP servers |
+| `POST /v1/mcp/server` | ✅ Supported | Add a new MCP server (admin) |
+| `PUT /v1/mcp/server` | ✅ Supported | Update an MCP server (admin) |
+| `GET /v1/mcp/server/{server_id}` | ✅ Supported | Get specific MCP server info |
+| `DELETE /v1/mcp/server/{server_id}` | ✅ Supported | Delete an MCP server (admin) |
+| `GET /v1/mcp/server/health` | ✅ Supported | Health check for MCP servers |
+| `GET /v1/mcp/tools` | ✅ Supported | List all available MCP tools |
+| `GET /v1/mcp/access_groups` | ✅ Supported | List MCP access groups |
+| `GET /v1/mcp/registry.json` | ✅ Supported | MCP registry for discovery |
+| `GET /mcp-rest/tools/list` | ✅ Supported | List tools with mcp_info |
+| `POST /mcp-rest/tools/call` | ✅ Supported | Call MCP tool via REST |
+
+### Example: Using Upstream-Compatible Path
+
+```bash
+# List all MCP servers (upstream-compatible)
+curl -X GET http://localhost:8080/v1/mcp/server \
+  -H "Authorization: Bearer <api_key>"
+
+# Create MCP server (upstream-compatible)
+curl -X POST http://localhost:8080/v1/mcp/server \
+  -H "Authorization: Bearer <master_key>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "server_name": "my-mcp-server",
+    "alias": "mcp",
+    "url": "https://mcp-service:8080/mcp",
+    "transport": "streamable_http"
+  }'
+```
+
+## OAuth Support (Feature-Flagged)
+
+RouteIQ Gateway supports OAuth2 authentication for MCP servers that require it. OAuth endpoints are **disabled by default** for security.
+
+### Enabling OAuth Support
+
+```bash
+export MCP_OAUTH_ENABLED=true
+```
+
+### OAuth Endpoints
+
+When `MCP_OAUTH_ENABLED=true`, these endpoints are available:
+
+| Endpoint | Description |
+|----------|-------------|
+| `POST /v1/mcp/server/oauth/session` | Create temporary OAuth session (~5 min TTL) |
+| `GET /v1/mcp/server/oauth/{server_id}/authorize` | OAuth authorization redirect |
+| `POST /v1/mcp/server/oauth/{server_id}/token` | OAuth token exchange |
+| `POST /v1/mcp/server/oauth/{server_id}/register` | OAuth dynamic client registration |
+| `GET /mcp/oauth/callback` | OAuth callback (validates state for CSRF) |
+
+### OAuth Flow Example
+
+```bash
+# 1. Create temporary session for OAuth server
+curl -X POST http://localhost:8080/v1/mcp/server/oauth/session \
+  -H "Authorization: Bearer <master_key>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "server_name": "oauth-mcp-server",
+    "url": "https://oauth-mcp.example.com",
+    "auth_type": "oauth2",
+    "authorization_url": "https://auth.example.com/authorize",
+    "token_url": "https://auth.example.com/token"
+  }'
+
+# 2. Redirect user to authorization endpoint
+# GET /v1/mcp/server/oauth/{server_id}/authorize?client_id=...&redirect_uri=...
+
+# 3. After callback, exchange code for tokens
+# POST /v1/mcp/server/oauth/{server_id}/token
+```
+
+### OAuth Security
+
+- **State validation**: All OAuth callbacks validate the `state` parameter for CSRF protection
+- **SSRF protection**: Authorization and token URLs are validated against SSRF policies
+- **Short-lived sessions**: OAuth sessions expire after 5 minutes
+
+## MCP Protocol Proxy (Feature-Flagged)
+
+The MCP Protocol Proxy allows RouteIQ Gateway to forward MCP protocol requests (SSE/streamable HTTP) to registered MCP servers. This is **disabled by default** for security.
+
+### Enabling Protocol Proxy
+
+```bash
+export MCP_PROTOCOL_PROXY_ENABLED=true
+```
+
+### Protocol Proxy Endpoint
+
+When enabled, the gateway exposes:
+
+```
+/mcp/{server_id}/*
+```
+
+Requests are proxied to the registered MCP server's URL with:
+- **SSRF protection**: Target URLs are validated against allow/deny policies
+- **Strict timeouts**: Connect (10s), read (120s) timeouts enforced
+- **Admin authentication**: Proxy requires admin API key
+
+### Example
+
+```bash
+# Proxy SSE request to MCP server
+curl -X POST http://localhost:8080/mcp/my-mcp-server/tools/call \
+  -H "Authorization: Bearer <master_key>" \
+  -H "Content-Type: application/json" \
+  -H "Accept: text/event-stream" \
+  -d '{"tool_name": "search", "arguments": {"query": "hello"}}'
+```
+
+### Protocol Proxy Configuration
+
+| Environment Variable | Default | Description |
+|---------------------|---------|-------------|
+| `MCP_PROTOCOL_PROXY_ENABLED` | `false` | Enable protocol proxy |
+| `MCP_PROXY_CONNECT_TIMEOUT` | `10` | Connect timeout (seconds) |
+| `MCP_PROXY_READ_TIMEOUT` | `120` | Read timeout (seconds) |
 
 ## See Also
 

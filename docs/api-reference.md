@@ -378,6 +378,42 @@ GET /v1/llmrouter/mcp/access_groups
 Authorization: Bearer sk-master-key
 ```
 
+## MCP Parity Layer (Upstream-Compatible)
+
+RouteIQ Gateway provides upstream-compatible endpoint aliases that match LiteLLM's native MCP API. This enables clients built for LiteLLM to work with RouteIQ without modification.
+
+### Upstream-Compatible Endpoints
+
+| LiteLLM Path | HTTP Method | Description |
+|--------------|-------------|-------------|
+| `/v1/mcp/server` | GET | List all MCP servers |
+| `/v1/mcp/server` | POST | Create MCP server (admin) |
+| `/v1/mcp/server` | PUT | Update MCP server (admin) |
+| `/v1/mcp/server/{server_id}` | GET | Get specific server |
+| `/v1/mcp/server/{server_id}` | DELETE | Delete server (admin) |
+| `/v1/mcp/server/health` | GET | Server health checks |
+| `/v1/mcp/tools` | GET | List all MCP tools |
+| `/v1/mcp/access_groups` | GET | List access groups |
+| `/v1/mcp/registry.json` | GET | MCP registry document |
+| `/mcp-rest/tools/list` | GET | List tools with mcp_info |
+| `/mcp-rest/tools/call` | POST | Call MCP tool via REST |
+
+### OAuth Endpoints (Feature-Flagged: `MCP_OAUTH_ENABLED=true`)
+
+| Path | HTTP Method | Description |
+|------|-------------|-------------|
+| `/v1/mcp/server/oauth/session` | POST | Create temporary OAuth session |
+| `/v1/mcp/server/oauth/{server_id}/authorize` | GET | OAuth authorize redirect |
+| `/v1/mcp/server/oauth/{server_id}/token` | POST | OAuth token exchange |
+| `/v1/mcp/server/oauth/{server_id}/register` | POST | OAuth client registration |
+| `/mcp/oauth/callback` | GET | OAuth callback handler |
+
+### Protocol Proxy (Feature-Flagged: `MCP_PROTOCOL_PROXY_ENABLED=true`)
+
+| Path | HTTP Method | Description |
+|------|-------------|-------------|
+| `/mcp/{server_id}/*` | * | Proxy to registered MCP server |
+
 ## Skills Gateway Endpoints
 
 > See [Skills Gateway Guide](skills-gateway.md) for full details.

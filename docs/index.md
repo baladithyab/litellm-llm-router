@@ -5,13 +5,20 @@ Welcome to the documentation for **RouteIQ Gateway**, the cloud-native General A
 ## Quick Links
 
 - [GitHub Repository](https://github.com/baladithyab/litellm-llm-router)
+- [Feature Parity & Roadmap](parity-roadmap.md)
 - [API Reference](api-reference.md)
 - [API Parity Analysis](api-parity-analysis.md)
 - [Configuration Guide](configuration.md)
 
 ## Getting Started
 
-### Quick Start
+### Quick Start Guides
+
+- [Docker Compose Quickstart](quickstart-docker-compose.md) - Basic setup for local development.
+- [High Availability Quickstart](quickstart-ha-compose.md) - Production-ready setup with Redis/Postgres.
+- [Observability Quickstart](quickstart-otel-compose.md) - Full OTel stack with Jaeger.
+
+### Basic Usage
 
 ```bash
 # Clone and start

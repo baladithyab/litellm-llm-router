@@ -15,6 +15,34 @@ This starts:
 - **Jupyter** (port 8888) - Interactive development
 - **Trainer** - Training environment with GPU support
 
+## Telemetry-Driven Training
+
+RouteIQ emits versioned routing telemetry (contract: `routeiq.router_decision.v1`) that can be used
+to continuously improve your routing models. See [Observability Training](observability-training.md)
+for the full contract schema.
+
+### Extracting Routing Decisions
+
+```bash
+# Extract routing decisions from Jaeger
+python examples/mlops/scripts/extract_jaeger_traces.py \
+    --jaeger-url http://localhost:16686 \
+    --service-name litellm-gateway \
+    --hours-back 168 \
+    --output traces.jsonl \
+    --routing-decisions-output routing_decisions.jsonl
+
+# Convert to LLMRouter training format
+python examples/mlops/scripts/convert_traces_to_llmrouter.py \
+    --input traces.jsonl \
+    --output-dir /app/data \
+    --include-routing-metadata
+```
+
+The extraction scripts support both:
+- **Legacy trace format** (span attributes)
+- **Versioned events** (`routeiq.router_decision.v1`)
+
 ## Training a Router
 
 ### 1. Prepare Training Data
@@ -138,3 +166,17 @@ Add to your GitHub Actions:
       --model-name ${{ inputs.model_name }} \
       --model-stage Production
 ```
+
+## Telemetry Contract Reference
+
+The `routeiq.router_decision.v1` contract provides:
+
+| Field | Description | Training Use |
+|-------|-------------|--------------|
+| `strategy_name` | Strategy that made the decision | Model comparison |
+| `candidate_deployments` | Models considered | Training labels |
+| `selected_deployment` | Model selected | Ground truth |
+| `outcome.status` | Success/failure | Performance labeling |
+| `timings.total_ms` | Decision latency | Performance metrics |
+
+For the complete schema, see [Observability Training](observability-training.md#contract-routeiqrouter_decisionv1).

@@ -2,6 +2,15 @@
 
 This document covers all available routing strategies in the LiteLLM + LLMRouter gateway.
 
+## Table of Contents
+
+- [LiteLLM Built-in Strategies](#litellm-built-in-strategies)
+- [LLMRouter ML-Based Strategies](#llmrouter-ml-based-strategies)
+- [A/B Testing & Runtime Hot-Swapping](#ab-testing--runtime-hot-swapping)
+- [Model Artifact Security](#model-artifact-security)
+- [Hot Reloading](#hot-reloading)
+- [Training Custom Models](#training-custom-models)
+
 ## LiteLLM Built-in Strategies
 
 These strategies are built into LiteLLM:
@@ -268,6 +277,31 @@ router_settings:
 
 See [Creating Custom Routers](https://github.com/ulab-uiuc/LLMRouter#-creating-custom-routers) for details.
 
+## Model Artifact Security
+
+When using pickle-based models (required for sklearn KNN/SVM/MLP routers), RouteIQ provides manifest-based verification to prevent loading of unauthorized or tampered model files.
+
+### Enabling Pickle Models with Verification
+
+```yaml
+# config.yaml
+router_settings:
+  routing_strategy: llmrouter-knn
+  routing_strategy_args:
+    model_path: /app/models/knn_router.pkl
+```
+
+```bash
+# Environment variables
+LLMROUTER_ALLOW_PICKLE_MODELS=true
+LLMROUTER_MODEL_MANIFEST_PATH=/app/models/manifest.json
+LLMROUTER_MODEL_PUBLIC_KEY_B64=<your-ed25519-public-key>
+```
+
+When `LLMROUTER_ALLOW_PICKLE_MODELS=true`, manifest verification is automatically enforced unless explicitly bypassed with `LLMROUTER_ENFORCE_SIGNED_MODELS=false`.
+
+See the [Security Guide](security.md#artifact-safety) for complete setup instructions.
+
 ## Hot Reloading
 
 All LLMRouter strategies support hot reloading:
@@ -286,3 +320,169 @@ The gateway will automatically detect model file changes and reload.
 - [MLOps Training Guide](mlops-training.md) - Full training pipeline with Docker
 - [Training from Observability Data](observability-training.md) - Use Jaeger/Tempo/CloudWatch traces
 - [LLMRouter Data Pipeline](https://github.com/ulab-uiuc/LLMRouter#-preparing-training-data) - Official data preparation guide
+
+## A/B Testing & Runtime Hot-Swapping
+
+RouteIQ supports runtime strategy hot-swapping and A/B testing through a strategy registry and routing pipeline architecture. This allows you to:
+
+- **Switch strategies at runtime** without restarts
+- **Run A/B tests** with deterministic weighted selection
+- **Fall back gracefully** when primary strategies fail
+- **Emit telemetry** for observing routing decisions via OpenTelemetry
+
+### Configuration
+
+Configure A/B testing via environment variables:
+
+```bash
+# Set a single active strategy
+LLMROUTER_ACTIVE_ROUTING_STRATEGY=llmrouter-knn
+
+# Or configure A/B weights (JSON format)
+LLMROUTER_STRATEGY_WEIGHTS='{"baseline": 90, "candidate": 10}'
+```
+
+When `LLMROUTER_STRATEGY_WEIGHTS` is set, the gateway performs weighted A/B selection. The weights are relative (not percentages):
+
+- `{"baseline": 90, "candidate": 10}` → 90% baseline, 10% candidate
+- `{"a": 1, "b": 1, "c": 1}` → ~33% each
+
+### Deterministic Assignment
+
+A/B selection is **deterministic** based on a hash key, ensuring:
+
+1. **Same user → same variant**: If a `user_id` is present in the request, that user always gets the same strategy variant
+2. **Same request → same variant**: If only `request_id` is available, that request is consistently assigned
+3. **Reproducible experiments**: The same hash key always produces the same selection
+
+Priority for hash key selection:
+1. `metadata.user_id` or `user` in request
+2. `metadata.request_id` or `litellm_call_id`
+3. Random (no stickiness guarantee)
+
+### Programmatic Configuration
+
+You can also configure A/B testing programmatically:
+
+```python
+from litellm_llmrouter import (
+    get_routing_registry,
+    RoutingStrategy,
+    RoutingContext,
+)
+
+# Get the global registry
+registry = get_routing_registry()
+
+# Custom strategy implementation
+class MyCustomStrategy(RoutingStrategy):
+    def select_deployment(self, context: RoutingContext):
+        # Your custom routing logic
+        router = context.router
+        # ... analyze context.messages, context.model, etc.
+        return deployment_dict  # or None
+
+# Register strategies
+registry.register("baseline", ExistingStrategy())
+registry.register("candidate", MyCustomStrategy())
+
+# Option 1: Set single active strategy
+registry.set_active("baseline")
+
+# Option 2: Configure A/B weights
+registry.set_weights({"baseline": 90, "candidate": 10})
+
+# Check current status
+status = registry.get_status()
+# {
+#     "registered_strategies": ["baseline", "candidate"],
+#     "active_strategy": None,
+#     "ab_weights": {"baseline": 90, "candidate": 10},
+#     "ab_enabled": True
+# }
+
+# Clear A/B and revert to single strategy
+registry.clear_weights()
+```
+
+### Telemetry & Observability
+
+When A/B testing is enabled, routing decisions emit telemetry via the `routeiq.router_decision.v1` contract as OpenTelemetry span events:
+
+```json
+{
+  "contract_name": "routeiq.router_decision.v1",
+  "strategy_name": "candidate",
+  "selected_deployment": "gpt-4-turbo",
+  "selection_reason": "ab_test",
+  "custom_attributes": {
+    "ab_enabled": true,
+    "ab_weights": {"baseline": 90, "candidate": 10},
+    "ab_hash_key": "user:abc123..."
+  },
+  "timings": {
+    "total_ms": 2.5
+  },
+  "outcome": {
+    "status": "success"
+  }
+}
+```
+
+Use this telemetry to:
+- Compare strategy performance in observability tools (Jaeger, Grafana, etc.)
+- Build dashboards showing A/B test results
+- Extract data for offline analysis and model retraining
+
+### Fallback Behavior
+
+The routing pipeline supports automatic fallback:
+
+1. **Primary strategy selected** via registry (A/B or active)
+2. **If primary fails**, fallback to default strategy
+3. **Telemetry marks fallback** for analysis
+
+```python
+# Fallback is tracked in routing results
+result = pipeline.route(context)
+if result.is_fallback:
+    print(f"Fell back due to: {result.fallback_reason}")
+```
+
+### Disabling Pipeline Routing
+
+To disable pipeline routing and revert to direct LLMRouter calls:
+
+```bash
+LLMROUTER_USE_PIPELINE=false
+```
+
+This maintains backward compatibility while allowing the new A/B testing features to be opted into.
+
+### Example: Canary Deployment
+
+Run a new routing strategy on 5% of traffic:
+
+```bash
+# Step 1: Deploy with small canary weight
+LLMROUTER_STRATEGY_WEIGHTS='{"production": 95, "canary-v2": 5}'
+
+# Step 2: Monitor telemetry for errors/latency
+# Look for strategy_name="canary-v2" in traces
+
+# Step 3: Gradually increase weight
+LLMROUTER_STRATEGY_WEIGHTS='{"production": 80, "canary-v2": 20}'
+
+# Step 4: Full rollout
+LLMROUTER_ACTIVE_ROUTING_STRATEGY=canary-v2
+unset LLMROUTER_STRATEGY_WEIGHTS
+```
+
+### Thread Safety
+
+The registry and pipeline are thread-safe:
+- Multiple strategies can be registered concurrently
+- Weight updates are atomic
+- Selection operations don't block on writes
+
+All configuration updates trigger registered callbacks for integration with admin endpoints or monitoring systems.

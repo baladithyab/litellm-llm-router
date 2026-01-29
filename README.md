@@ -11,7 +11,7 @@ Cloud-native General AI Gateway (powered by LiteLLM) with pluggable routing inte
 
 ## Overview
 
-**RouteIQ Gateway** is a production-grade, cloud-native AI Gateway that extends the capabilities of the upstream [LiteLLM Proxy](https://github.com/BerriAI/litellm). It adds a layer of **pluggable routing intelligence** and a **closed-loop MLOps workflow**, enabling organizations to optimize LLM traffic for cost, latency, and quality using their own data.
+**RouteIQ Gateway** is a production-grade, cloud-native **General AI Gateway** that extends the capabilities of the upstream [LiteLLM Proxy](https://github.com/BerriAI/litellm). It serves as a unified control plane for all AI interactions—LLMs, Agents, Tools (MCP), and Skills—while adding a layer of **pluggable routing intelligence** and a **closed-loop MLOps workflow**.
 
 While LiteLLM provides the core proxy and protocol translation, RouteIQ Gateway adds:
 - **Intelligent Routing**: Pluggable strategies (KNN, MLP, etc.) that learn from your traffic.
@@ -22,13 +22,17 @@ While LiteLLM provides the core proxy and protocol translation, RouteIQ Gateway 
 
 RouteIQ Gateway unifies multiple AI interaction patterns under a single endpoint:
 
-- **Standard OpenAI API**: Full compatibility for chat, completions, and embeddings.
-- **Extended API Families**: Inherits full support for `/v1/responses`, `/v1/assistants`, `/v1/files`, and more. See [API Parity Analysis](docs/api-parity-analysis.md).
-- **MCP (Model Context Protocol)**: Bridge MCP servers to LLMs, allowing models to use tools and resources securely.
-- **A2A (Agent-to-Agent)**: Standardized protocol for multi-agent communication and orchestration.
-- **Skills**: Register and execute Python functions as "skills" that can be invoked by models.
-- **Vector Stores**: *Inherited* OpenAI-compatible `/v1/vector_stores*` endpoints for file search.
-  > **Note**: Deep integration with external Vector Databases (Pinecone, Weaviate, etc.) is currently *planned* and not yet fully implemented.
+| Feature | Status | Description |
+|---------|--------|-------------|
+| **LLM Proxy** | ✅ Available | Standard OpenAI-compatible chat/completions. |
+| **A2A (Agent-to-Agent)** | ✅ Available | Protocol for multi-agent orchestration. |
+| **MCP Gateway** | ✅ Available | Connect LLMs to external tools via Model Context Protocol. |
+| **Skills** | ✅ Available | Anthropic Computer Use, Bash, and Text Editor skills. |
+| **Vector Stores** | ⚠️ Partial | Inherited OpenAI endpoints; deep external DB integration planned. |
+| **Observability** | ✅ Available | OpenTelemetry tracing, metrics, and logging. |
+| **Security** | ✅ Available | SSRF protection, Admin Auth, Role-based access. |
+
+See [Feature Parity & Roadmap](docs/parity-roadmap.md) for details.
 
 ## Architecture
 
@@ -46,28 +50,38 @@ The gateway operates as the central nervous system for your AI infrastructure, o
 
 ## Quick Start
 
-### Using Docker Compose
+### 1. Docker Compose (Basic)
+
+Ideal for local development.
 
 ```bash
-# Clone the repository
+# Clone and start
 git clone https://github.com/baladithyab/litellm-llm-router.git
 cd litellm-llm-router
-
-# Start with basic setup
-docker compose up -d
-
-# Or start with full HA stack (Redis + PostgreSQL)
-docker compose -f docker-compose.ha.yml up -d
-
-# Or start with Observability stack (Jaeger + Prometheus)
-docker compose -f docker-compose.otel.yml up -d
+docker-compose up -d
 ```
 
-### Using Pre-built Image
+[View Docker Compose Quickstart](docs/quickstart-docker-compose.md)
+
+### 2. High Availability (Production)
+
+Includes Redis and PostgreSQL for state and caching.
 
 ```bash
-docker run -p 4000:4000 ghcr.io/baladithyab/litellm-llm-router:latest
+docker-compose -f docker-compose.ha.yml up -d
 ```
+
+[View HA Quickstart](docs/quickstart-ha-compose.md)
+
+### 3. Observability (OTel + Jaeger)
+
+Includes Jaeger for full trace visualization.
+
+```bash
+docker-compose -f docker-compose.otel.yml up -d
+```
+
+[View Observability Quickstart](docs/quickstart-otel-compose.md)
 
 ## Deployment
 
@@ -95,6 +109,7 @@ Security is a first-class citizen in RouteIQ Gateway:
 | Document | Description |
 |----------|-------------|
 | [Getting Started](docs/index.md) | Comprehensive guide to setting up and using the gateway. |
+| [Feature Parity & Roadmap](docs/parity-roadmap.md) | Status of features vs. LiteLLM and future plans. |
 | [API Reference](docs/api-reference.md) | Detailed API documentation. |
 | [Routing Strategies](docs/routing-strategies.md) | Explanation of available routing strategies. |
 | [MLOps Training](docs/mlops-training.md) | Guide to the MLOps training loop. |

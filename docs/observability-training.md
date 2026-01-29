@@ -55,6 +55,182 @@ LLMRouter training requires this data per request:
 | `response_time` | Latency in seconds | Span duration |
 | `token_num` | Total tokens used | Span: `gen_ai.usage.total_tokens` |
 
+## Versioned Routing Telemetry Contract
+
+Starting with RouteIQ v1.0, routing decisions emit a **versioned telemetry event** following the `routeiq.router_decision.v1` contract. This provides a stable, documented schema for MLOps pipelines.
+
+### Contract: `routeiq.router_decision.v1`
+
+The routing decision event is emitted as an OpenTelemetry span event with a single JSON payload attribute.
+
+**Event Name:** `routeiq.router_decision.v1`  
+**Payload Key:** `routeiq.router_decision.payload`
+
+### Schema Definition
+
+```json
+{
+  "contract_version": "v1",
+  "contract_name": "routeiq.router_decision.v1",
+  "event_id": "uuid-string",
+  
+  "trace_id": "32-hex-char-trace-id",
+  "span_id": "16-hex-char-span-id",
+  "parent_span_id": "16-hex-char-parent-id | null",
+  
+  "timestamp_utc": "2024-01-15T10:30:00.000Z",
+  "timestamp_unix_ms": 1705315800000,
+  
+  "input": {
+    "requested_model": "gpt-4 | null",
+    "query_length": 150,
+    "user_id": "hashed-user-id | null",
+    "team_id": "team-id | null",
+    "request_metadata": {}
+  },
+  
+  "strategy_name": "llmrouter-knn",
+  "strategy_version": "1.0.0 | null",
+  
+  "candidate_deployments": [
+    {
+      "model_name": "gpt-4",
+      "provider": "openai",
+      "score": 0.95,
+      "available": true
+    },
+    {
+      "model_name": "claude-3-opus",
+      "provider": "anthropic",
+      "score": 0.82,
+      "available": true
+    }
+  ],
+  
+  "selected_deployment": "gpt-4",
+  "selection_reason": "highest_score",
+  
+  "timings": {
+    "total_ms": 15.5,
+    "strategy_ms": 10.2,
+    "embedding_ms": 3.1,
+    "candidate_filter_ms": 2.2
+  },
+  
+  "outcome": {
+    "status": "success | failure | fallback | no_candidates | timeout | error",
+    "error_message": "null | error description",
+    "error_type": "null | ErrorClassName",
+    "input_tokens": 100,
+    "output_tokens": 200,
+    "total_tokens": 300
+  },
+  
+  "fallback": {
+    "fallback_triggered": false,
+    "original_model": "null | model-name",
+    "fallback_reason": "null | rate_limit | error | timeout",
+    "fallback_attempt": 0
+  },
+  
+  "custom_attributes": {}
+}
+```
+
+### Field Descriptions
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `contract_version` | string | Schema version for compatibility checking |
+| `contract_name` | string | Full contract identifier |
+| `event_id` | string | Unique identifier for this event (UUID) |
+| `trace_id` | string | OpenTelemetry trace ID (32 hex chars) |
+| `span_id` | string | OpenTelemetry span ID (16 hex chars) |
+| `input.query_length` | int | Character count of query (PII-safe, no content) |
+| `strategy_name` | string | Routing strategy used (e.g., `llmrouter-knn`) |
+| `candidate_deployments` | array | Models considered during routing |
+| `selected_deployment` | string | Model that was selected |
+| `timings.total_ms` | float | Total routing decision latency |
+| `outcome.status` | enum | Final outcome of the routing decision |
+
+### PII Safety
+
+The contract is designed to be **PII-safe**:
+- **No query content** is logged - only `query_length`
+- **No response content** is logged
+- User/team IDs should be **hashed/anonymized** before logging
+
+### Extracting Events from Jaeger
+
+```python
+#!/usr/bin/env python3
+"""Extract routing decision events from Jaeger."""
+import json
+import requests
+
+JAEGER_URL = "http://localhost:16686"
+CONTRACT_NAME = "routeiq.router_decision.v1"
+PAYLOAD_KEY = "routeiq.router_decision.payload"
+
+def extract_routing_decisions(service_name: str, hours_back: int = 24):
+    """Extract routing decision events from Jaeger traces."""
+    from datetime import datetime, timedelta
+    
+    end_time = datetime.now()
+    start_time = end_time - timedelta(hours=hours_back)
+    
+    response = requests.get(
+        f"{JAEGER_URL}/api/traces",
+        params={
+            "service": service_name,
+            "start": int(start_time.timestamp() * 1_000_000),
+            "end": int(end_time.timestamp() * 1_000_000),
+            "limit": 10000,
+        }
+    )
+    
+    decisions = []
+    for trace in response.json().get("data", []):
+        for span in trace.get("spans", []):
+            for log in span.get("logs", []):
+                fields = {f["key"]: f["value"] for f in log.get("fields", [])}
+                payload = fields.get(PAYLOAD_KEY)
+                if payload:
+                    data = json.loads(payload)
+                    if data.get("contract_name") == CONTRACT_NAME:
+                        decisions.append(data)
+    
+    return decisions
+
+# Example usage
+decisions = extract_routing_decisions("litellm-gateway", hours_back=24)
+print(f"Found {len(decisions)} routing decisions")
+```
+
+### Using the MLOps Extraction Script
+
+The provided extraction script supports both legacy traces and versioned events:
+
+```bash
+# Extract traces with routing decisions
+python examples/mlops/scripts/extract_jaeger_traces.py \
+    --jaeger-url http://localhost:16686 \
+    --service-name litellm-gateway \
+    --hours-back 168 \
+    --output traces.jsonl \
+    --routing-decisions-output routing_decisions.jsonl
+```
+
+### Converting to Training Format
+
+```bash
+# Convert traces to LLMRouter format
+python examples/mlops/scripts/convert_traces_to_llmrouter.py \
+    --input traces.jsonl \
+    --output-dir /tmp/llmrouter_data \
+    --include-routing-metadata
+```
+
 ## Extracting Traces
 
 ### From Jaeger

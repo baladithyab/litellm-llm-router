@@ -85,6 +85,89 @@ upstream litellm_backend {
 }
 ```
 
+## Config Sync Leader Election
+
+When running multiple replicas, config sync from S3/GCS can cause issues:
+- **Thundering herd**: All replicas simultaneously downloading the same config
+- **Conflicting updates**: Replicas overwriting each other's changes
+- **Wasted bandwidth**: Redundant downloads from cloud storage
+
+To solve this, RouteIQ includes an optional **leader election** mechanism that ensures only one replica performs config sync at a time.
+
+### How It Works
+
+1. **Database-backed lease lock**: Uses PostgreSQL to coordinate across replicas
+2. **Lease-based with renewal**: Leader holds a lease that expires automatically if not renewed
+3. **Crash recovery**: If a leader crashes, the lease expires and another replica takes over
+4. **Non-blocking**: Non-leaders skip sync quietly without blocking
+
+### Configuration
+
+Leader election is **automatically enabled** when `DATABASE_URL` is configured (HA mode).
+
+| Environment Variable | Default | Description |
+|---------------------|---------|-------------|
+| `LLMROUTER_CONFIG_SYNC_LEADER_ELECTION_ENABLED` | `true` (if DATABASE_URL set) | Enable/disable leader election |
+| `LLMROUTER_CONFIG_SYNC_LEASE_SECONDS` | `30` | How long a leader holds the lock |
+| `LLMROUTER_CONFIG_SYNC_RENEW_INTERVAL_SECONDS` | `10` | How often to renew the lease |
+| `LLMROUTER_CONFIG_SYNC_LOCK_NAME` | `config_sync` | Lock name (for multiple independent locks) |
+
+### Example Configuration
+
+```yaml
+# docker-compose.ha.yml
+services:
+  gateway-1:
+    environment:
+      DATABASE_URL: postgresql://user:pass@postgres:5432/litellm
+      CONFIG_S3_BUCKET: my-config-bucket
+      CONFIG_S3_KEY: configs/config.yaml
+      # Leader election enabled automatically (DATABASE_URL is set)
+      
+  gateway-2:
+    environment:
+      DATABASE_URL: postgresql://user:pass@postgres:5432/litellm
+      CONFIG_S3_BUCKET: my-config-bucket
+      CONFIG_S3_KEY: configs/config.yaml
+      # Both replicas share the same database for coordination
+```
+
+### Monitoring Leader Election
+
+Check the config sync status endpoint to see leader election status:
+
+```bash
+curl http://localhost:4000/llmrouter/config/sync/status
+```
+
+Response includes:
+```json
+{
+  "enabled": true,
+  "running": true,
+  "leader_election": {
+    "enabled": true,
+    "is_leader": true,
+    "holder_id": "gateway-1-abc123",
+    "lease_expires_at": "2024-01-15T10:30:00Z",
+    "skipped_sync_count": 0
+  }
+}
+```
+
+### Disabling Leader Election
+
+To disable leader election (all replicas sync independently):
+
+```bash
+LLMROUTER_CONFIG_SYNC_LEADER_ELECTION_ENABLED=false
+```
+
+This may be useful for:
+- Development/testing with a single instance
+- Custom coordination mechanisms
+- Debugging sync issues
+
 ## Scaling
 
 ### Horizontal Scaling

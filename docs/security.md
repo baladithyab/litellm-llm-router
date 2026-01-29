@@ -185,6 +185,184 @@ RouteIQ Gateway uses machine learning models for routing. To prevent arbitrary c
 - **Safe Formats**: We recommend using `safetensors` or ONNX for model weights.
 - **Opt-in Only**: If you must use pickle (e.g., for legacy Scikit-Learn models), you must explicitly enable it via environment variable: `LLMROUTER_ALLOW_PICKLE_MODELS=true`.
 
+### Manifest-Based Verification
+
+When pickle loading is enabled, RouteIQ provides cryptographic verification of model artifacts against a signed manifest. This ensures only authorized model files can be loaded.
+
+**Configuration:**
+
+```bash
+# .env
+
+# Enable pickle loading (required for sklearn models)
+LLMROUTER_ALLOW_PICKLE_MODELS=true
+
+# Path to the model manifest (JSON or YAML)
+LLMROUTER_MODEL_MANIFEST_PATH=/app/models/manifest.json
+
+# Enforce manifest verification (automatic when pickle is enabled)
+# Set to "false" to bypass (NOT recommended)
+LLMROUTER_ENFORCE_SIGNED_MODELS=true
+
+# For Ed25519 signature verification (recommended)
+LLMROUTER_MODEL_PUBLIC_KEY_B64=<base64-encoded-32-byte-public-key>
+# Or use a file path
+LLMROUTER_MODEL_PUBLIC_KEY_PATH=/app/secrets/model-signing-key.pub
+
+# For HMAC-SHA256 verification (alternative)
+LLMROUTER_MODEL_HMAC_SECRET=<shared-secret>
+```
+
+### Manifest Format
+
+The manifest lists allowed model artifacts with their SHA256 hashes:
+
+```json
+{
+  "version": "1.0",
+  "created_at": "2026-01-28T10:00:00Z",
+  "signature_type": "ed25519",
+  "signature": "<base64-encoded-signature>",
+  "artifacts": [
+    {
+      "path": "models/knn_router.pkl",
+      "sha256": "a1b2c3d4e5f6...",
+      "description": "Production KNN routing model v1.2",
+      "tags": ["production", "v1.2"]
+    }
+  ]
+}
+```
+
+See [`models/manifest.example.json`](../models/manifest.example.json) for a complete example.
+
+### Supported Signature Types
+
+| Type | Environment Variable | Description |
+|------|---------------------|-------------|
+| `ed25519` | `LLMROUTER_MODEL_PUBLIC_KEY_B64` or `_PATH` | **Recommended**. Asymmetric signing with Ed25519. |
+| `hmac-sha256` | `LLMROUTER_MODEL_HMAC_SECRET` | Symmetric signing with HMAC-SHA256. |
+| `none` | N/A | Unsigned manifest (hash verification only). |
+
+### Verification Flow
+
+1. **Load Manifest**: Gateway loads manifest from `LLMROUTER_MODEL_MANIFEST_PATH`
+2. **Verify Signature**: If `signature_type` is not `none`, verify the manifest signature
+3. **Artifact Check**: Before loading any pickle file:
+   - Check if artifact exists in manifest
+   - Compute SHA256 hash of the file
+   - Compare with manifest hash
+4. **Reject on Mismatch**: If hash doesn't match, loading is blocked
+
+### Safe Activation with Rollback
+
+When hot-reloading models, RouteIQ uses a safe activation pattern:
+
+1. **Load New Model**: Load the new model into a temporary instance
+2. **Verify**: Check against manifest before activating
+3. **Atomic Swap**: Only swap to the new model if verification succeeds
+4. **Rollback**: If loading or verification fails, keep the old model active
+5. **Observability**: Log and track active model versions with SHA256 hashes
+
+This ensures the gateway never enters an invalid state during reloads:
+
+```python
+# Internal behavior (pseudocode)
+def reload_model(self):
+    old_model = self.active_model
+    try:
+        new_model = load_and_verify(self.model_path)
+        self.active_model = new_model  # Only on success
+        return True
+    except (VerificationError, LoadError):
+        # Keep old model active
+        log.error("Reload failed, keeping old model")
+        return False
+```
+
+### Recommended Signing Workflow
+
+**1. Generate Ed25519 Keypair (one-time):**
+
+```python
+from litellm_llmrouter.model_artifacts import generate_ed25519_keypair
+
+private_key_b64, public_key_b64 = generate_ed25519_keypair()
+print(f"Private key (keep secret): {private_key_b64}")
+print(f"Public key (distribute):   {public_key_b64}")
+```
+
+Or via OpenSSL:
+```bash
+# Generate private key
+openssl genpkey -algorithm ED25519 -out model-signing-key.pem
+
+# Extract public key
+openssl pkey -in model-signing-key.pem -pubout -out model-signing-key.pub
+```
+
+**2. Create Signed Manifest (in CI/CD):**
+
+```python
+from litellm_llmrouter.model_artifacts import ManifestSigner, SignatureType
+
+signer = ManifestSigner(private_key_path="/secrets/model-signing-key.pem")
+
+# Create entries for each model file
+entry = signer.create_artifact_entry(
+    "models/knn_router.pkl",
+    description="KNN routing model v1.2",
+    tags=["production", "v1.2"],
+)
+
+# Create and sign manifest
+manifest = signer.create_manifest(
+    artifacts=[entry],
+    signature_type=SignatureType.ED25519,
+    version="1.0",
+)
+
+# Save to file
+signer.save_manifest(manifest, "models/manifest.json")
+```
+
+**3. Deploy with Public Key:**
+
+```yaml
+# Kubernetes ConfigMap or Secret
+apiVersion: v1
+kind: Secret
+metadata:
+  name: model-signing-key
+data:
+  public-key: <base64-encoded-public-key>
+```
+
+```yaml
+# Deployment environment
+env:
+  - name: LLMROUTER_ALLOW_PICKLE_MODELS
+    value: "true"
+  - name: LLMROUTER_MODEL_MANIFEST_PATH
+    value: "/app/models/manifest.json"
+  - name: LLMROUTER_MODEL_PUBLIC_KEY_B64
+    valueFrom:
+      secretKeyRef:
+        name: model-signing-key
+        key: public-key
+```
+
+### Observability
+
+Active model versions are tracked for observability:
+
+- **SHA256 hash** of the active model
+- **Manifest path** used for verification
+- **Load timestamp**
+- **Tags** from manifest (e.g., `["production", "v1.2"]`)
+
+This metadata is available via the routing span attributes and can be queried in your observability platform.
+
 ## Key Management
 
 Never store API keys in your configuration files or code.
