@@ -4,6 +4,10 @@ Configuration Sync and Hot Reload
 
 Background sync from S3/GCS with file watching for hot reload.
 Uses ETag-based caching to avoid unnecessary downloads.
+
+In HA deployments with multiple replicas, leader election is used
+to ensure only one replica performs the sync at a time, avoiding
+thundering herd problems and conflicting updates.
 """
 
 import hashlib
@@ -21,6 +25,9 @@ class ConfigSyncManager:
 
     Uses ETag-based change detection to minimize bandwidth and only
     download when remote config has actually changed.
+
+    In HA mode with leader election enabled, only the leader replica
+    performs the actual sync. Non-leaders skip quietly.
     """
 
     def __init__(
@@ -39,6 +46,9 @@ class ConfigSyncManager:
         self._sync_thread: threading.Thread | None = None
         self._reload_count = 0
         self._last_sync_time: float | None = None
+        self._skipped_sync_count = (
+            0  # Track skipped syncs (non-leader)
+        )
 
         # S3 config
         self.s3_bucket = os.getenv("CONFIG_S3_BUCKET")
@@ -55,6 +65,51 @@ class ConfigSyncManager:
             os.getenv("CONFIG_HOT_RELOAD", "false").lower() == "true"
         )
         self.sync_enabled = os.getenv("CONFIG_SYNC_ENABLED", "true").lower() == "true"
+
+        # Leader election (optional, for HA deployments)
+        self._leader_election = None
+        self._leader_election_enabled = False
+        self._initialize_leader_election()
+
+    def _initialize_leader_election(self):
+        """Initialize leader election if enabled."""
+        try:
+            from litellm_llmrouter.leader_election import (
+                get_leader_election,
+                get_leader_election_config,
+            )
+
+            config = get_leader_election_config()
+            self._leader_election_enabled = config["enabled"]
+
+            if self._leader_election_enabled:
+                self._leader_election = get_leader_election()
+                verbose_proxy_logger.info(
+                    "Config sync: Leader election enabled"
+                )
+            else:
+                verbose_proxy_logger.debug(
+                    "Config sync: Leader election disabled"
+                )
+
+        except ImportError as e:
+            verbose_proxy_logger.warning(
+                f"Config sync: Leader election not available: {e}"
+            )
+            self._leader_election_enabled = False
+
+    def _is_leader(self) -> bool:
+        """
+        Check if this instance is the leader (or if leader election is disabled).
+
+        Returns:
+            True if this instance should perform sync, False otherwise
+        """
+        # If leader election is not enabled, always perform sync
+        if not self._leader_election_enabled or self._leader_election is None:
+            return True
+
+        return self._leader_election.is_leader
 
     def _compute_file_hash(self, path: Path) -> str | None:
         """Compute MD5 hash of a file."""
@@ -136,21 +191,33 @@ class ConfigSyncManager:
 
         verbose_proxy_logger.info(
             f"Config sync started (interval: {self.sync_interval}s, "
-            f"hot_reload: {self.hot_reload_enabled})"
+            f"hot_reload: {self.hot_reload_enabled}, "
+            f"leader_election: {self._leader_election_enabled})"
         )
 
         while not self._stop_event.is_set():
             try:
                 self._last_sync_time = time.time()
 
-                # Check S3 for updates using ETag
-                if self.s3_sync_enabled:
-                    if self._download_from_s3_if_changed() and self.hot_reload_enabled:
-                        verbose_proxy_logger.info(
-                            "Config changed, triggering reload..."
+                # Check if we are the leader before syncing
+                if not self._is_leader():
+                    self._skipped_sync_count += 1
+                    if self._skipped_sync_count % 10 == 1:  # Log every 10th skip
+                        verbose_proxy_logger.debug(
+                            f"Config sync: Skipping (not leader, skipped={self._skipped_sync_count})"
                         )
-                        self._trigger_reload()
-                        self._reload_count += 1
+                else:
+                    # Reset skipped count when we become leader
+                    self._skipped_sync_count = 0
+
+                    # Check S3 for updates using ETag
+                    if self.s3_sync_enabled:
+                        if self._download_from_s3_if_changed() and self.hot_reload_enabled:
+                            verbose_proxy_logger.info(
+                                "Config changed, triggering reload..."
+                            )
+                            self._trigger_reload()
+                            self._reload_count += 1
 
             except Exception as e:
                 verbose_proxy_logger.error(f"Config sync error: {e}")
@@ -181,12 +248,48 @@ class ConfigSyncManager:
             )
             return
 
+        # Start leader election renewal if enabled
+        if self._leader_election_enabled and self._leader_election is not None:
+            # Initialize leader election table and try initial acquisition
+            import asyncio
+
+            try:
+                loop = asyncio.new_event_loop()
+                try:
+                    loop.run_until_complete(
+                        self._leader_election.ensure_table_exists()
+                    )
+                    loop.run_until_complete(self._leader_election.try_acquire())
+                finally:
+                    loop.close()
+            except Exception as e:
+                verbose_proxy_logger.warning(
+                    f"Config sync: Leader election init error: {e}"
+                )
+
+            # Start background lease renewal
+            self._leader_election.start_renewal(
+                on_leadership_change=self._on_leadership_change
+            )
+
         self._sync_thread = threading.Thread(target=self._sync_loop, daemon=True)
         self._sync_thread.start()
+
+    def _on_leadership_change(self, is_leader: bool):
+        """Callback when leadership status changes."""
+        if is_leader:
+            verbose_proxy_logger.info("Config sync: Became leader, will sync")
+        else:
+            verbose_proxy_logger.info("Config sync: Lost leadership, will skip sync")
 
     def stop(self):
         """Stop the background sync."""
         self._stop_event.set()
+
+        # Stop leader election renewal
+        if self._leader_election_enabled and self._leader_election is not None:
+            self._leader_election.stop_renewal()
+
         if self._sync_thread and self._sync_thread.is_alive():
             self._sync_thread.join(timeout=5)
 
@@ -198,7 +301,7 @@ class ConfigSyncManager:
 
     def get_status(self) -> dict:
         """Get the current sync status."""
-        return {
+        status = {
             "enabled": self.sync_enabled,
             "hot_reload_enabled": self.hot_reload_enabled,
             "sync_interval_seconds": self.sync_interval,
@@ -222,7 +325,18 @@ class ConfigSyncManager:
             "reload_count": self._reload_count,
             "last_sync_time": self._last_sync_time,
             "running": self._sync_thread is not None and self._sync_thread.is_alive(),
+            "leader_election": {
+                "enabled": self._leader_election_enabled,
+                "is_leader": self._is_leader(),
+                "skipped_sync_count": self._skipped_sync_count,
+            },
         }
+
+        # Add detailed leader election status if available
+        if self._leader_election_enabled and self._leader_election is not None:
+            status["leader_election"].update(self._leader_election.get_status())
+
+        return status
 
 
 # Singleton instance
