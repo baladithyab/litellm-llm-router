@@ -149,6 +149,33 @@ class TestLLMDataLoading:
 class TestA2AGateway:
     """Test A2A Gateway functionality."""
 
+    @pytest.fixture(autouse=True)
+    def setup_ssrf_config(self):
+        """Allow localhost and private IPs for these tests."""
+        from litellm_llmrouter.url_security import clear_ssrf_config_cache
+        
+        # Store original values
+        orig_allow_private = os.environ.get("LLMROUTER_ALLOW_PRIVATE_IPS")
+        orig_allowlist = os.environ.get("LLMROUTER_SSRF_ALLOWLIST_HOSTS")
+        
+        # Allow localhost and private IPs for tests
+        os.environ["LLMROUTER_ALLOW_PRIVATE_IPS"] = "true"
+        os.environ["LLMROUTER_SSRF_ALLOWLIST_HOSTS"] = "localhost"
+        clear_ssrf_config_cache()
+        
+        yield
+        
+        # Restore original values
+        if orig_allow_private is not None:
+            os.environ["LLMROUTER_ALLOW_PRIVATE_IPS"] = orig_allow_private
+        else:
+            os.environ.pop("LLMROUTER_ALLOW_PRIVATE_IPS", None)
+        if orig_allowlist is not None:
+            os.environ["LLMROUTER_SSRF_ALLOWLIST_HOSTS"] = orig_allowlist
+        else:
+            os.environ.pop("LLMROUTER_SSRF_ALLOWLIST_HOSTS", None)
+        clear_ssrf_config_cache()
+
     def test_a2a_gateway_init(self):
         """Test A2AGateway initialization."""
         from litellm_llmrouter.a2a_gateway import A2AGateway
@@ -211,6 +238,27 @@ class TestA2AGateway:
 
 class TestMCPGateway:
     """Test MCP Gateway functionality."""
+
+    @pytest.fixture(autouse=True)
+    def setup_ssrf_config(self):
+        """Allow private IPs for these tests."""
+        from litellm_llmrouter.url_security import clear_ssrf_config_cache
+        
+        # Store original values
+        orig_allow_private = os.environ.get("LLMROUTER_ALLOW_PRIVATE_IPS")
+        
+        # Allow private IPs for tests
+        os.environ["LLMROUTER_ALLOW_PRIVATE_IPS"] = "true"
+        clear_ssrf_config_cache()
+        
+        yield
+        
+        # Restore original values
+        if orig_allow_private is not None:
+            os.environ["LLMROUTER_ALLOW_PRIVATE_IPS"] = orig_allow_private
+        else:
+            os.environ.pop("LLMROUTER_ALLOW_PRIVATE_IPS", None)
+        clear_ssrf_config_cache()
 
     def test_mcp_gateway_init(self):
         """Test MCPGateway initialization."""
