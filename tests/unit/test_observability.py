@@ -391,3 +391,214 @@ class TestObservabilityConfiguration:
         assert "service.version" in attrs
         assert "deployment.environment" in attrs
         assert "service.namespace" in attrs
+
+
+# Import sampling classes for tests
+from opentelemetry.sdk.trace.sampling import (
+    ALWAYS_ON,
+    ALWAYS_OFF,
+    TraceIdRatioBased,
+    ParentBased,
+)
+
+# Import the _get_sampler_from_env function
+_get_sampler_from_env = observability._get_sampler_from_env
+
+
+class TestSamplerConfiguration:
+    """Test suite for trace sampler configuration."""
+
+    def test_default_sampler_is_parentbased_always_on(self):
+        """Test that default sampler is ParentBased(always_on) for backwards compatibility."""
+        with patch.dict(os.environ, {}, clear=True):
+            sampler = _get_sampler_from_env()
+            assert isinstance(sampler, ParentBased)
+
+    def test_otel_sampler_always_on(self):
+        """Test OTEL_TRACES_SAMPLER=always_on returns ALWAYS_ON."""
+        with patch.dict(os.environ, {"OTEL_TRACES_SAMPLER": "always_on"}, clear=True):
+            sampler = _get_sampler_from_env()
+            assert sampler is ALWAYS_ON
+
+    def test_otel_sampler_always_off(self):
+        """Test OTEL_TRACES_SAMPLER=always_off returns ALWAYS_OFF."""
+        with patch.dict(os.environ, {"OTEL_TRACES_SAMPLER": "always_off"}, clear=True):
+            sampler = _get_sampler_from_env()
+            assert sampler is ALWAYS_OFF
+
+    def test_otel_sampler_traceidratio(self):
+        """Test OTEL_TRACES_SAMPLER=traceidratio with arg."""
+        with patch.dict(
+            os.environ,
+            {"OTEL_TRACES_SAMPLER": "traceidratio", "OTEL_TRACES_SAMPLER_ARG": "0.5"},
+            clear=True,
+        ):
+            sampler = _get_sampler_from_env()
+            assert isinstance(sampler, TraceIdRatioBased)
+            # Access internal ratio (implementation detail, but useful for testing)
+            assert sampler._rate == 0.5
+
+    def test_otel_sampler_traceidratio_default_arg(self):
+        """Test OTEL_TRACES_SAMPLER=traceidratio without arg defaults to 1.0."""
+        with patch.dict(
+            os.environ,
+            {"OTEL_TRACES_SAMPLER": "traceidratio"},
+            clear=True,
+        ):
+            sampler = _get_sampler_from_env()
+            assert isinstance(sampler, TraceIdRatioBased)
+            assert sampler._rate == 1.0
+
+    def test_otel_sampler_traceidratio_invalid_arg(self):
+        """Test OTEL_TRACES_SAMPLER=traceidratio with invalid arg defaults to 1.0."""
+        with patch.dict(
+            os.environ,
+            {"OTEL_TRACES_SAMPLER": "traceidratio", "OTEL_TRACES_SAMPLER_ARG": "invalid"},
+            clear=True,
+        ):
+            sampler = _get_sampler_from_env()
+            assert isinstance(sampler, TraceIdRatioBased)
+            assert sampler._rate == 1.0
+
+    def test_otel_sampler_parentbased_always_on(self):
+        """Test OTEL_TRACES_SAMPLER=parentbased_always_on."""
+        with patch.dict(
+            os.environ,
+            {"OTEL_TRACES_SAMPLER": "parentbased_always_on"},
+            clear=True,
+        ):
+            sampler = _get_sampler_from_env()
+            assert isinstance(sampler, ParentBased)
+
+    def test_otel_sampler_parentbased_always_off(self):
+        """Test OTEL_TRACES_SAMPLER=parentbased_always_off."""
+        with patch.dict(
+            os.environ,
+            {"OTEL_TRACES_SAMPLER": "parentbased_always_off"},
+            clear=True,
+        ):
+            sampler = _get_sampler_from_env()
+            assert isinstance(sampler, ParentBased)
+
+    def test_otel_sampler_parentbased_traceidratio(self):
+        """Test OTEL_TRACES_SAMPLER=parentbased_traceidratio with arg."""
+        with patch.dict(
+            os.environ,
+            {
+                "OTEL_TRACES_SAMPLER": "parentbased_traceidratio",
+                "OTEL_TRACES_SAMPLER_ARG": "0.25",
+            },
+            clear=True,
+        ):
+            sampler = _get_sampler_from_env()
+            assert isinstance(sampler, ParentBased)
+
+    def test_otel_sampler_unknown_falls_back_to_default(self):
+        """Test unknown OTEL_TRACES_SAMPLER falls back to default."""
+        with patch.dict(
+            os.environ,
+            {"OTEL_TRACES_SAMPLER": "unknown_sampler"},
+            clear=True,
+        ):
+            sampler = _get_sampler_from_env()
+            # Falls back to default (ParentBased)
+            assert isinstance(sampler, ParentBased)
+
+    def test_llmrouter_sample_rate(self):
+        """Test LLMROUTER_OTEL_SAMPLE_RATE for simple ratio sampling."""
+        with patch.dict(
+            os.environ,
+            {"LLMROUTER_OTEL_SAMPLE_RATE": "0.1"},
+            clear=True,
+        ):
+            sampler = _get_sampler_from_env()
+            assert isinstance(sampler, ParentBased)
+
+    def test_llmrouter_sample_rate_clamps_values(self):
+        """Test LLMROUTER_OTEL_SAMPLE_RATE clamps to 0.0-1.0 range."""
+        # Value > 1.0 should be clamped to 1.0
+        with patch.dict(
+            os.environ,
+            {"LLMROUTER_OTEL_SAMPLE_RATE": "2.0"},
+            clear=True,
+        ):
+            sampler = _get_sampler_from_env()
+            assert isinstance(sampler, ParentBased)
+
+        # Value < 0.0 should be clamped to 0.0
+        with patch.dict(
+            os.environ,
+            {"LLMROUTER_OTEL_SAMPLE_RATE": "-0.5"},
+            clear=True,
+        ):
+            sampler = _get_sampler_from_env()
+            assert isinstance(sampler, ParentBased)
+
+    def test_llmrouter_sample_rate_invalid_value(self):
+        """Test LLMROUTER_OTEL_SAMPLE_RATE with invalid value falls back to default."""
+        with patch.dict(
+            os.environ,
+            {"LLMROUTER_OTEL_SAMPLE_RATE": "not_a_number"},
+            clear=True,
+        ):
+            sampler = _get_sampler_from_env()
+            # Falls back to default (ParentBased with ALWAYS_ON)
+            assert isinstance(sampler, ParentBased)
+
+    def test_otel_sampler_takes_precedence_over_llmrouter(self):
+        """Test OTEL_TRACES_SAMPLER takes precedence over LLMROUTER_OTEL_SAMPLE_RATE."""
+        with patch.dict(
+            os.environ,
+            {
+                "OTEL_TRACES_SAMPLER": "always_off",
+                "LLMROUTER_OTEL_SAMPLE_RATE": "1.0",
+            },
+            clear=True,
+        ):
+            sampler = _get_sampler_from_env()
+            assert sampler is ALWAYS_OFF
+
+    def test_otel_sampler_case_insensitive(self):
+        """Test OTEL_TRACES_SAMPLER is case-insensitive."""
+        with patch.dict(
+            os.environ,
+            {"OTEL_TRACES_SAMPLER": "ALWAYS_ON"},
+            clear=True,
+        ):
+            sampler = _get_sampler_from_env()
+            assert sampler is ALWAYS_ON
+
+
+class TestObservabilityManagerSampler:
+    """Test suite for ObservabilityManager sampler integration."""
+
+    def test_manager_has_sampler_property(self):
+        """Test that ObservabilityManager exposes sampler via property."""
+        manager = ObservabilityManager()
+        assert hasattr(manager, "sampler")
+        assert manager.sampler is not None
+
+    def test_manager_uses_env_sampler_by_default(self):
+        """Test that manager uses env-based sampler when no explicit sampler provided."""
+        with patch.dict(os.environ, {"OTEL_TRACES_SAMPLER": "always_off"}, clear=True):
+            manager = ObservabilityManager()
+            assert manager.sampler is ALWAYS_OFF
+
+    def test_manager_accepts_custom_sampler(self):
+        """Test that manager accepts a custom sampler parameter."""
+        custom_sampler = TraceIdRatioBased(0.42)
+        manager = ObservabilityManager(sampler=custom_sampler)
+        assert manager.sampler is custom_sampler
+
+    def test_manager_custom_sampler_overrides_env(self):
+        """Test that explicit sampler parameter overrides env vars."""
+        custom_sampler = ALWAYS_ON
+        with patch.dict(os.environ, {"OTEL_TRACES_SAMPLER": "always_off"}, clear=True):
+            manager = ObservabilityManager(sampler=custom_sampler)
+            assert manager.sampler is ALWAYS_ON
+
+    def test_manager_default_sampler_is_parentbased(self):
+        """Test that default sampler is ParentBased for backwards compatibility."""
+        with patch.dict(os.environ, {}, clear=True):
+            manager = ObservabilityManager()
+            assert isinstance(manager.sampler, ParentBased)

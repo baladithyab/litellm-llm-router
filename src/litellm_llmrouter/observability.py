@@ -32,6 +32,13 @@ from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
 from opentelemetry.sdk.resources import Resource, SERVICE_NAME, SERVICE_VERSION
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from opentelemetry.sdk.trace.sampling import (
+    Sampler,
+    ALWAYS_ON,
+    ALWAYS_OFF,
+    TraceIdRatioBased,
+    ParentBased,
+)
 from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter
 
 logger = logging.getLogger(__name__)
@@ -60,6 +67,99 @@ def _is_sdk_tracer_provider(provider: Any) -> bool:
     )
 
 
+def _get_sampler_from_env() -> Sampler:
+    """
+    Build a Sampler based on environment variables.
+
+    This function honors OTEL standard env vars and a custom LLMROUTER_OTEL_SAMPLE_RATE:
+
+    1. If OTEL_TRACES_SAMPLER is set, use the standard OTEL sampler configuration:
+       - "always_on": Sample all traces
+       - "always_off": Sample no traces
+       - "traceidratio": Sample based on OTEL_TRACES_SAMPLER_ARG (ratio 0.0-1.0)
+       - "parentbased_always_on": Parent-based with always_on root
+       - "parentbased_always_off": Parent-based with always_off root
+       - "parentbased_traceidratio": Parent-based with ratio-based root
+
+    2. If LLMROUTER_OTEL_SAMPLE_RATE is set (0.0-1.0), use a parent-based ratio sampler.
+       This is a convenience for simple percentage-based sampling.
+
+    3. Default: Always sample (1.0 / 100%) for backwards compatibility.
+
+    Returns:
+        Configured Sampler instance
+    """
+    # Check OTEL standard env var first
+    otel_sampler = os.getenv("OTEL_TRACES_SAMPLER", "").lower()
+
+    if otel_sampler:
+        sampler_arg = os.getenv("OTEL_TRACES_SAMPLER_ARG", "")
+
+        if otel_sampler == "always_on":
+            logger.info("Using OTEL sampler: always_on")
+            return ALWAYS_ON
+
+        elif otel_sampler == "always_off":
+            logger.info("Using OTEL sampler: always_off")
+            return ALWAYS_OFF
+
+        elif otel_sampler == "traceidratio":
+            try:
+                ratio = float(sampler_arg) if sampler_arg else 1.0
+                ratio = max(0.0, min(1.0, ratio))  # Clamp to valid range
+            except ValueError:
+                logger.warning(
+                    f"Invalid OTEL_TRACES_SAMPLER_ARG '{sampler_arg}', using 1.0"
+                )
+                ratio = 1.0
+            logger.info(f"Using OTEL sampler: traceidratio ({ratio})")
+            return TraceIdRatioBased(ratio)
+
+        elif otel_sampler == "parentbased_always_on":
+            logger.info("Using OTEL sampler: parentbased_always_on")
+            return ParentBased(root=ALWAYS_ON)
+
+        elif otel_sampler == "parentbased_always_off":
+            logger.info("Using OTEL sampler: parentbased_always_off")
+            return ParentBased(root=ALWAYS_OFF)
+
+        elif otel_sampler == "parentbased_traceidratio":
+            try:
+                ratio = float(sampler_arg) if sampler_arg else 1.0
+                ratio = max(0.0, min(1.0, ratio))
+            except ValueError:
+                logger.warning(
+                    f"Invalid OTEL_TRACES_SAMPLER_ARG '{sampler_arg}', using 1.0"
+                )
+                ratio = 1.0
+            logger.info(f"Using OTEL sampler: parentbased_traceidratio ({ratio})")
+            return ParentBased(root=TraceIdRatioBased(ratio))
+
+        else:
+            logger.warning(
+                f"Unknown OTEL_TRACES_SAMPLER '{otel_sampler}', falling back to default"
+            )
+
+    # Check custom LLMROUTER env var for simple ratio-based sampling
+    llmrouter_sample_rate = os.getenv("LLMROUTER_OTEL_SAMPLE_RATE", "")
+    if llmrouter_sample_rate:
+        try:
+            ratio = float(llmrouter_sample_rate)
+            ratio = max(0.0, min(1.0, ratio))  # Clamp to valid range
+            logger.info(f"Using LLMROUTER_OTEL_SAMPLE_RATE: {ratio}")
+            # Use ParentBased to respect incoming trace decisions
+            return ParentBased(root=TraceIdRatioBased(ratio))
+        except ValueError:
+            logger.warning(
+                f"Invalid LLMROUTER_OTEL_SAMPLE_RATE '{llmrouter_sample_rate}', "
+                "using default (1.0)"
+            )
+
+    # Default: sample everything (backwards compatible)
+    logger.debug("Using default sampler: ParentBased(always_on)")
+    return ParentBased(root=ALWAYS_ON)
+
+
 class ObservabilityManager:
     """
     Manages OpenTelemetry observability for the LiteLLM + LLMRouter Gateway.
@@ -84,6 +184,7 @@ class ObservabilityManager:
         enable_traces: bool = True,
         enable_logs: bool = True,
         enable_metrics: bool = True,
+        sampler: Optional[Sampler] = None,
     ):
         """
         Initialize the observability manager.
@@ -96,6 +197,8 @@ class ObservabilityManager:
             enable_traces: Whether to enable distributed tracing
             enable_logs: Whether to enable structured logging
             enable_metrics: Whether to enable metrics collection
+            sampler: Optional custom Sampler. If None, the sampler is configured from
+                     environment variables (OTEL_TRACES_SAMPLER, LLMROUTER_OTEL_SAMPLE_RATE).
         """
         self.service_name = service_name
         self.service_version = service_version
@@ -106,6 +209,8 @@ class ObservabilityManager:
         self.enable_traces = enable_traces
         self.enable_logs = enable_logs
         self.enable_metrics = enable_metrics
+        # Resolve sampler: explicit > env-based > default
+        self._sampler = sampler if sampler is not None else _get_sampler_from_env()
 
         # Create resource with service identification
         self.resource = Resource.create(
@@ -156,7 +261,10 @@ class ObservabilityManager:
         The logic is:
         1. Check if an SDK TracerProvider already exists (from LiteLLM or auto-instrumentation)
         2. If yes, reuse it and just add our OTLP BatchSpanProcessor
-        3. If no, create a new SDK TracerProvider with our resource
+        3. If no, create a new SDK TracerProvider with our resource and sampler
+
+        Note: When reusing an existing provider, we cannot change its sampler.
+        The sampler is only applied when creating a new provider.
         """
         existing_provider = trace.get_tracer_provider()
 
@@ -167,12 +275,17 @@ class ObservabilityManager:
             self._tracer_provider = existing_provider
             logger.info("Reusing existing SDK TracerProvider - attaching OTLP exporter")
         else:
-            # No SDK provider exists yet - create one with our resource
+            # No SDK provider exists yet - create one with our resource and sampler
             # This happens when our code runs before any auto-instrumentation
-            self._tracer_provider = TracerProvider(resource=self.resource)
+            self._tracer_provider = TracerProvider(
+                resource=self.resource,
+                sampler=self._sampler,
+            )
             trace.set_tracer_provider(self._tracer_provider)
             logger.info(
-                "Created new SDK TracerProvider with resource: %s", self.service_name
+                "Created new SDK TracerProvider with resource: %s, sampler: %s",
+                self.service_name,
+                type(self._sampler).__name__,
             )
 
         # Add our OTLP exporter as a BatchSpanProcessor
@@ -370,6 +483,11 @@ class ObservabilityManager:
             extra=log_data,
             exc_info=True,
         )
+
+    @property
+    def sampler(self) -> Sampler:
+        """Get the configured sampler for tracing."""
+        return self._sampler
 
 
 # Global observability manager instance
