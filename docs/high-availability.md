@@ -94,6 +94,15 @@ When running multiple replicas, config sync from S3/GCS can cause issues:
 
 To solve this, RouteIQ includes an optional **leader election** mechanism that ensures only one replica performs config sync at a time.
 
+### HA Mode Setting
+
+RouteIQ supports two HA modes controlled by the `LLMROUTER_HA_MODE` environment variable:
+
+| Mode | Value | Description |
+|------|-------|-------------|
+| **Single** | `single` (default) | All instances sync independently. Use for single-instance deployments. |
+| **Leader Election** | `leader_election` | Only the elected leader performs config sync. Use for multi-replica HA deployments. |
+
 ### How It Works
 
 1. **Database-backed lease lock**: Uses PostgreSQL to coordinate across replicas
@@ -105,9 +114,11 @@ To solve this, RouteIQ includes an optional **leader election** mechanism that e
 
 Leader election is **automatically enabled** when `DATABASE_URL` is configured (HA mode).
 
+Set `LLMROUTER_HA_MODE=leader_election` to enable coordinated config sync:
+
 | Environment Variable | Default | Description |
 |---------------------|---------|-------------|
-| `LLMROUTER_CONFIG_SYNC_LEADER_ELECTION_ENABLED` | `true` (if DATABASE_URL set) | Enable/disable leader election |
+| `LLMROUTER_HA_MODE` | `single` | HA mode: `single` or `leader_election` |
 | `LLMROUTER_CONFIG_SYNC_LEASE_SECONDS` | `30` | How long a leader holds the lock |
 | `LLMROUTER_CONFIG_SYNC_RENEW_INTERVAL_SECONDS` | `10` | How often to renew the lease |
 | `LLMROUTER_CONFIG_SYNC_LOCK_NAME` | `config_sync` | Lock name (for multiple independent locks) |

@@ -78,18 +78,24 @@ class ConfigSyncManager:
             )
 
             config = get_leader_election_config()
+            self._ha_mode = config.get("ha_mode", "single")
             self._leader_election_enabled = config["enabled"]
 
             if self._leader_election_enabled:
                 self._leader_election = get_leader_election()
-                verbose_proxy_logger.info("Config sync: Leader election enabled")
+                verbose_proxy_logger.info(
+                    f"Config sync: HA mode '{self._ha_mode}', leader election enabled"
+                )
             else:
-                verbose_proxy_logger.debug("Config sync: Leader election disabled")
+                verbose_proxy_logger.debug(
+                    f"Config sync: HA mode '{self._ha_mode}', leader election disabled"
+                )
 
         except ImportError as e:
             verbose_proxy_logger.warning(
                 f"Config sync: Leader election not available: {e}"
             )
+            self._ha_mode = "single"
             self._leader_election_enabled = False
 
     def _is_leader(self) -> bool:
@@ -324,6 +330,7 @@ class ConfigSyncManager:
             "reload_count": self._reload_count,
             "last_sync_time": self._last_sync_time,
             "running": self._sync_thread is not None and self._sync_thread.is_alive(),
+            "ha_mode": getattr(self, "_ha_mode", "single"),
             "leader_election": {
                 "enabled": self._leader_election_enabled,
                 "is_leader": self._is_leader(),

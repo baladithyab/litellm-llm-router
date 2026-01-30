@@ -36,6 +36,11 @@ DEFAULT_LEASE_SECONDS = 30
 DEFAULT_RENEW_INTERVAL_SECONDS = 10
 DEFAULT_LOCK_NAME = "config_sync"
 
+# HA Mode settings
+HA_MODE_SINGLE = "single"
+HA_MODE_LEADER_ELECTION = "leader_election"
+DEFAULT_HA_MODE = HA_MODE_SINGLE
+
 
 def _get_env_bool(key: str, default: bool) -> bool:
     """Get boolean from environment variable."""
@@ -55,6 +60,31 @@ def _get_env_int(key: str, default: int) -> int:
         return default
 
 
+def get_ha_mode() -> str:
+    """
+    Get the HA mode configuration.
+
+    Returns:
+        HA mode string: 'single' or 'leader_election'
+    """
+    mode = os.getenv("LLMROUTER_HA_MODE", "").lower().strip()
+    if mode in (HA_MODE_SINGLE, HA_MODE_LEADER_ELECTION):
+        return mode
+
+    # Legacy support: auto-enable leader_election if DATABASE_URL is set
+    # and the legacy env var is true
+    legacy_enabled = _get_env_bool(
+        "LLMROUTER_CONFIG_SYNC_LEADER_ELECTION_ENABLED",
+        default=False,
+    )
+    if legacy_enabled and os.getenv("DATABASE_URL"):
+        return HA_MODE_LEADER_ELECTION
+
+    # Default: if DATABASE_URL is set and HA_MODE not explicitly set,
+    # still default to 'single' for backwards compatibility
+    return DEFAULT_HA_MODE
+
+
 def get_leader_election_config() -> dict:
     """
     Get leader election configuration from environment.
@@ -62,17 +92,12 @@ def get_leader_election_config() -> dict:
     Returns:
         Dictionary with leader election configuration
     """
-    # Check if HA mode is likely enabled (database configured)
-    is_ha_mode = os.getenv("DATABASE_URL") is not None
-
-    # Leader election is enabled by default in HA mode, disabled otherwise
-    enabled = _get_env_bool(
-        "LLMROUTER_CONFIG_SYNC_LEADER_ELECTION_ENABLED",
-        default=is_ha_mode,
-    )
+    ha_mode = get_ha_mode()
+    enabled = ha_mode == HA_MODE_LEADER_ELECTION
 
     return {
         "enabled": enabled,
+        "ha_mode": ha_mode,
         "lease_seconds": _get_env_int(
             "LLMROUTER_CONFIG_SYNC_LEASE_SECONDS",
             DEFAULT_LEASE_SECONDS,
@@ -251,7 +276,11 @@ class LeaderElection:
         """
         if not self._db_url:
             # No database configured, assume single instance mode
+            # Set a synthetic lease that never expires (far future)
+            from datetime import timedelta
+
             self._is_leader = True
+            self._lease_expires_at = datetime.now(timezone.utc) + timedelta(days=365)
             return True
 
         try:

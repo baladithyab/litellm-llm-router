@@ -48,6 +48,7 @@ class TestLeaderElectionConfig:
             # Ensure DATABASE_URL is not set
             os.environ.pop("DATABASE_URL", None)
             os.environ.pop("LLMROUTER_CONFIG_SYNC_LEADER_ELECTION_ENABLED", None)
+            os.environ.pop("LLMROUTER_HA_MODE", None)
 
             config = get_leader_election_config()
 
@@ -57,22 +58,49 @@ class TestLeaderElectionConfig:
             assert config["lock_name"] == "config_sync"
 
     def test_default_config_with_database(self):
-        """Default config with database should enable leader election."""
+        """Default config with database should NOT auto-enable leader election (new behavior).
+
+        Note: The new behavior requires explicit LLMROUTER_HA_MODE=leader_election.
+        DATABASE_URL alone no longer auto-enables leader election for backwards compatibility.
+        """
         with patch.dict(
             os.environ,
             {"DATABASE_URL": "postgresql://localhost/test"},
-            clear=False,
+            clear=True,
+        ):
+            # Explicitly remove HA_MODE to test default
+            os.environ.pop("LLMROUTER_HA_MODE", None)
+            os.environ.pop("LLMROUTER_CONFIG_SYNC_LEADER_ELECTION_ENABLED", None)
+
+            config = get_leader_election_config()
+
+            # New default: single mode (disabled)
+            assert config["enabled"] is False
+            assert config["ha_mode"] == "single"
+
+    def test_explicit_enable_ha_mode(self):
+        """Explicit LLMROUTER_HA_MODE=leader_election enables leader election."""
+        with patch.dict(
+            os.environ,
+            {
+                "LLMROUTER_HA_MODE": "leader_election",
+            },
+            clear=True,
         ):
             config = get_leader_election_config()
 
             assert config["enabled"] is True
+            assert config["ha_mode"] == "leader_election"
 
-    def test_explicit_enable(self):
-        """Explicit enable should override default."""
+    def test_legacy_explicit_enable(self):
+        """Legacy LLMROUTER_CONFIG_SYNC_LEADER_ELECTION_ENABLED still works with DATABASE_URL."""
         with patch.dict(
             os.environ,
-            {"LLMROUTER_CONFIG_SYNC_LEADER_ELECTION_ENABLED": "true"},
-            clear=False,
+            {
+                "LLMROUTER_CONFIG_SYNC_LEADER_ELECTION_ENABLED": "true",
+                "DATABASE_URL": "postgresql://localhost/test",
+            },
+            clear=True,
         ):
             config = get_leader_election_config()
 
@@ -84,9 +112,9 @@ class TestLeaderElectionConfig:
             os.environ,
             {
                 "DATABASE_URL": "postgresql://localhost/test",
-                "LLMROUTER_CONFIG_SYNC_LEADER_ELECTION_ENABLED": "false",
+                "LLMROUTER_HA_MODE": "single",
             },
-            clear=False,
+            clear=True,
         ):
             config = get_leader_election_config()
 
@@ -101,7 +129,7 @@ class TestLeaderElectionConfig:
                 "LLMROUTER_CONFIG_SYNC_RENEW_INTERVAL_SECONDS": "20",
                 "LLMROUTER_CONFIG_SYNC_LOCK_NAME": "custom_lock",
             },
-            clear=False,
+            clear=True,
         ):
             config = get_leader_election_config()
 
@@ -117,7 +145,7 @@ class TestLeaderElectionConfig:
                 "LLMROUTER_CONFIG_SYNC_LEASE_SECONDS": "invalid",
                 "LLMROUTER_CONFIG_SYNC_RENEW_INTERVAL_SECONDS": "not-a-number",
             },
-            clear=False,
+            clear=True,
         ):
             config = get_leader_election_config()
 
