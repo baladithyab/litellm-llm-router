@@ -17,15 +17,30 @@ Usage:
 
 import json
 import os
+import sys
+from pathlib import Path
 import click
 import torch
 from sentence_transformers import SentenceTransformer
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, Optional
 
-# Contract constants (matches telemetry_contracts.py)
-CONTRACT_VERSION = "v1"
-CONTRACT_NAME = "routeiq.router_decision"
-CONTRACT_FULL_NAME = f"{CONTRACT_NAME}.{CONTRACT_VERSION}"
+# Add project root to path for imports
+_project_root = Path(__file__).parent.parent.parent.parent
+if str(_project_root) not in sys.path:
+    sys.path.insert(0, str(_project_root))
+
+# Import contract constants from source-of-truth module
+try:
+    from litellm_llmrouter.telemetry_contracts import (
+        CONTRACT_VERSION,
+        CONTRACT_NAME,
+        CONTRACT_FULL_NAME,
+    )
+except ImportError:
+    # Fallback for standalone use: duplicate constants must match source
+    CONTRACT_VERSION = "v1"
+    CONTRACT_NAME = "routeiq.router_decision"
+    CONTRACT_FULL_NAME = f"{CONTRACT_NAME}.{CONTRACT_VERSION}"
 
 
 def is_routing_decision_record(record: Dict[str, Any]) -> bool:
@@ -36,12 +51,12 @@ def is_routing_decision_record(record: Dict[str, Any]) -> bool:
 def normalize_trace_record(record: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """
     Normalize a trace record to a common format.
-    
+
     Handles both legacy trace format and new routing decision format.
-    
+
     Args:
         record: Raw trace record from JSONL
-        
+
     Returns:
         Normalized record dict, or None if invalid
     """
@@ -120,7 +135,7 @@ def convert_traces(
     traces = []
     routing_decision_count = 0
     legacy_count = 0
-    
+
     with open(input_file, "r") as f:
         for line in f:
             raw_record = json.loads(line)
@@ -143,13 +158,17 @@ def convert_traces(
     # For routing decisions without query content, use trace_id as query key
     unique_queries = []
     query_to_index = {}
-    
+
     for t in traces:
-        query_key = t["query"] if t["query"] else f"routing_decision:{t['trace_id']}:{t['span_id']}"
+        query_key = (
+            t["query"]
+            if t["query"]
+            else f"routing_decision:{t['trace_id']}:{t['span_id']}"
+        )
         if query_key not in query_to_index:
             query_to_index[query_key] = len(unique_queries)
             unique_queries.append(query_key)
-    
+
     unique_models = list(set(t["model_name"] for t in traces if t["model_name"]))
 
     print(f"   Unique queries/decisions: {len(unique_queries)}")
@@ -159,26 +178,32 @@ def convert_traces(
     # Note: For routing decisions without query text, we create placeholder embeddings
     print(f"🔧 Generating embeddings with: {embedding_model}")
     model = SentenceTransformer(embedding_model)
-    
+
     # Filter queries that have actual text content for embedding
-    queries_with_text = [q for q in unique_queries if not q.startswith("routing_decision:")]
-    placeholder_queries = [q for q in unique_queries if q.startswith("routing_decision:")]
-    
+    queries_with_text = [
+        q for q in unique_queries if not q.startswith("routing_decision:")
+    ]
+    placeholder_queries = [
+        q for q in unique_queries if q.startswith("routing_decision:")
+    ]
+
     if queries_with_text:
         text_embeddings = model.encode(queries_with_text, convert_to_tensor=True)
         print(f"   Generated embeddings for {len(queries_with_text)} text queries")
     else:
         text_embeddings = None
-    
+
     # Create placeholder embeddings for routing decisions without query text
     embedding_dim = model.get_sentence_embedding_dimension()
     if placeholder_queries:
         # Use zero vectors as placeholders - these need query text for proper training
         placeholder_embeddings = torch.zeros(len(placeholder_queries), embedding_dim)
-        print(f"   Created {len(placeholder_queries)} placeholder embeddings (need query text)")
+        print(
+            f"   Created {len(placeholder_queries)} placeholder embeddings (need query text)"
+        )
     else:
         placeholder_embeddings = None
-    
+
     # Combine embeddings in correct order
     all_embeddings = []
     text_idx = 0
@@ -190,33 +215,39 @@ def convert_traces(
         else:
             all_embeddings.append(text_embeddings[text_idx])
             text_idx += 1
-    
+
     embeddings = torch.stack(all_embeddings)
 
     # Convert traces to routing data format
     routing_data = []
     for trace in traces:
-        query_key = trace["query"] if trace["query"] else f"routing_decision:{trace['trace_id']}:{trace['span_id']}"
-        
+        query_key = (
+            trace["query"]
+            if trace["query"]
+            else f"routing_decision:{trace['trace_id']}:{trace['span_id']}"
+        )
+
         record = {
             "query": trace["query"],
             "model_name": trace["model_name"],
             "performance": trace.get("performance", 0.5),
             "embedding_id": query_to_index[query_key],
         }
-        
+
         # Include routing metadata if requested
         if include_routing_metadata:
-            record.update({
-                "strategy_name": trace.get("strategy_name", ""),
-                "strategy_version": trace.get("strategy_version"),
-                "outcome_status": trace.get("outcome_status", ""),
-                "candidate_count": trace.get("candidate_count", 0),
-                "response_time_ms": trace.get("response_time", 0) * 1000,
-                "trace_id": trace.get("trace_id", ""),
-                "contract_version": trace.get("contract_version"),
-            })
-        
+            record.update(
+                {
+                    "strategy_name": trace.get("strategy_name", ""),
+                    "strategy_version": trace.get("strategy_version"),
+                    "outcome_status": trace.get("outcome_status", ""),
+                    "candidate_count": trace.get("candidate_count", 0),
+                    "response_time_ms": trace.get("response_time", 0) * 1000,
+                    "trace_id": trace.get("trace_id", ""),
+                    "contract_version": trace.get("contract_version"),
+                }
+            )
+
         routing_data.append(record)
 
     # Split into train/test
@@ -270,24 +301,30 @@ def convert_traces(
         "embedding_model": embedding_model,
         "embedding_dim": embedding_dim,
     }
-    
+
     metadata_path = os.path.join(output_dir, "conversion_metadata.json")
     with open(metadata_path, "w") as f:
         json.dump(metadata, f, indent=2)
     print(f"✅ Saved conversion metadata: {metadata_path}")
 
     print(f"\n🎉 Conversion complete! Data saved to: {output_dir}")
-    
+
     if placeholder_queries:
-        print(f"\n⚠️  Warning: {len(placeholder_queries)} routing decision events lack query text.")
-        print("   These use placeholder embeddings and need query content for effective training.")
-        print("   Consider enabling prompt logging (with PII precautions) for better embeddings.")
+        print(
+            f"\n⚠️  Warning: {len(placeholder_queries)} routing decision events lack query text."
+        )
+        print(
+            "   These use placeholder embeddings and need query content for effective training."
+        )
+        print(
+            "   Consider enabling prompt logging (with PII precautions) for better embeddings."
+        )
 
 
 def _infer_provider(model_name: str) -> str:
     """Infer provider from model name."""
     model_lower = model_name.lower()
-    
+
     if "claude" in model_lower or "anthropic" in model_lower:
         return "anthropic"
     elif "gpt" in model_lower or "openai" in model_lower:

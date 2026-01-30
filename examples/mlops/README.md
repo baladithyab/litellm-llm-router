@@ -10,6 +10,114 @@ The MLOps pipeline enables you to:
 - **Track experiments** with MLflow including parameters, metrics, and artifacts
 - **Deploy models** to S3 or local storage for use with LiteLLM gateway
 
+## Telemetry Contract
+
+### Contract: `routeiq.router_decision.v1`
+
+The RouteIQ gateway emits a **versioned telemetry event** for every routing decision, following a stable contract for MLOps consumption.
+
+| Property | Value |
+|----------|-------|
+| **Contract Name** | `routeiq.router_decision.v1` |
+| **Event Name** | `routeiq.router_decision.v1` |
+| **Payload Key** | `routeiq.router_decision.payload` |
+| **Version** | `v1` |
+| **PII-Safe** | Yes (no query/response content) |
+
+### Schema Fields
+
+```json
+{
+  "contract_version": "v1",
+  "contract_name": "routeiq.router_decision.v1",
+  "event_id": "uuid",
+  "trace_id": "32-hex-trace-id",
+  "span_id": "16-hex-span-id",
+  "timestamp_utc": "2024-01-15T10:30:00.000Z",
+  "timestamp_unix_ms": 1705315800000,
+  
+  "input": {
+    "query_length": 150,
+    "requested_model": "gpt-4 | null",
+    "user_id": "hashed-user-id | null",
+    "team_id": "team-id | null"
+  },
+  
+  "strategy_name": "llmrouter-knn",
+  "strategy_version": "1.0.0 | null",
+  
+  "candidate_deployments": [
+    {"model_name": "gpt-4", "provider": "openai", "score": 0.95, "available": true}
+  ],
+  
+  "selected_deployment": "gpt-4",
+  "selection_reason": "highest_score",
+  
+  "timings": {
+    "total_ms": 15.5,
+    "strategy_ms": 10.2,
+    "embedding_ms": 3.1
+  },
+  
+  "outcome": {
+    "status": "success | failure | fallback | error | no_candidates | timeout",
+    "input_tokens": 100,
+    "output_tokens": 200,
+    "total_tokens": 300
+  },
+  
+  "fallback": {
+    "fallback_triggered": false,
+    "original_model": null,
+    "fallback_reason": null
+  }
+}
+```
+
+### Key Fields for Training
+
+| Field | Description | Training Use |
+|-------|-------------|--------------|
+| `strategy_name` | Strategy that made the decision | Model comparison |
+| `candidate_deployments` | Models considered | Training labels |
+| `selected_deployment` | Model selected | Ground truth |
+| `outcome.status` | Success/failure | Performance labeling |
+| `timings.total_ms` | Decision latency | Performance metrics |
+| `input.query_length` | Query size (PII-safe) | Feature engineering |
+
+### End-to-End Pipeline
+
+```
+┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
+│  Gateway Emits  │───▶│ Jaeger/Tempo     │───▶│ Extract Script  │
+│  Telemetry      │    │ Stores Events    │    │ Parses JSON     │
+└─────────────────┘    └──────────────────┘    └─────────────────┘
+                                                        │
+                                                        ▼
+┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
+│  Deploy Model   │◀───│ MLflow Tracks    │◀───│ Convert Script  │
+│  to Gateway     │    │ Experiments      │    │ Creates JSONL   │
+└─────────────────┘    └──────────────────┘    └─────────────────┘
+```
+
+1. **Gateway emits** `routeiq.router_decision.v1` events as OTEL span events
+2. **Jaeger/Tempo** stores the spans with embedded JSON payloads
+3. **Extract script** queries Jaeger API and parses the versioned events
+4. **Convert script** transforms to LLMRouter training format (JSONL + embeddings)
+5. **MLflow** tracks training experiments and model artifacts
+6. **Deploy** models to S3/local for hot-reload by the gateway
+
+### Source of Truth
+
+The contract is defined in [`src/litellm_llmrouter/telemetry_contracts.py`](../../src/litellm_llmrouter/telemetry_contracts.py):
+
+- `CONTRACT_VERSION = "v1"`
+- `CONTRACT_NAME = "routeiq.router_decision"`
+- `ROUTER_DECISION_EVENT_NAME` - Span event name
+- `ROUTER_DECISION_PAYLOAD_KEY` - Attribute key for JSON payload
+
+The extraction scripts import from this module to ensure consistency.
+
 ## Quick Start
 
 ### Option 1: Local Development (Recommended for Testing)
