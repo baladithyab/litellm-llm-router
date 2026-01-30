@@ -23,11 +23,15 @@ from dataclasses import dataclass, field, asdict
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-
 # Contract version - increment on breaking changes
-CONTRACT_VERSION = "v1"
+CONTRACT_MAJOR_VERSION = 1
+CONTRACT_MINOR_VERSION = 1  # Bumped for experiment tracking (additive)
+CONTRACT_VERSION = f"v{CONTRACT_MAJOR_VERSION}.{CONTRACT_MINOR_VERSION}"
 CONTRACT_NAME = "routeiq.router_decision"
 CONTRACT_FULL_NAME = f"{CONTRACT_NAME}.{CONTRACT_VERSION}"
+
+# Backwards compatible version for parsing older events
+SUPPORTED_CONTRACT_VERSIONS = ["v1", "v1.0", "v1.1"]
 
 
 class RoutingOutcome(str, Enum):
@@ -39,6 +43,40 @@ class RoutingOutcome(str, Enum):
     ERROR = "error"
     NO_CANDIDATES = "no_candidates"
     TIMEOUT = "timeout"
+
+
+@dataclass
+class ExperimentAssignment:
+    """
+    A/B testing experiment assignment information.
+
+    Enables downstream analysis of which experiment variant was assigned
+    and the deterministic hash bucket for reproducibility.
+    """
+
+    experiment_id: Optional[str] = None
+    """Unique identifier for the experiment (e.g., 'routing-strategy-v2-rollout')."""
+
+    variant: Optional[str] = None
+    """Assigned variant name (e.g., 'control', 'treatment', 'candidate-v2')."""
+
+    strategy_name: Optional[str] = None
+    """Name of the strategy used for this variant."""
+
+    strategy_version: Optional[str] = None
+    """Version of the strategy (e.g., model SHA256 prefix, semver)."""
+
+    weight: Optional[int] = None
+    """Configured weight for this variant (for debugging weight correctness)."""
+
+    total_weight: Optional[int] = None
+    """Total weight across all variants."""
+
+    hash_bucket: Optional[int] = None
+    """Deterministic hash bucket value (0 to total_weight-1)."""
+
+    hash_key_type: Optional[str] = None
+    """Type of key used for hashing (user, request, random)."""
 
 
 @dataclass
@@ -149,7 +187,7 @@ class RouterDecisionEvent:
     """Contract version for schema evolution."""
 
     contract_name: str = CONTRACT_FULL_NAME
-    """Full contract name (routeiq.router_decision.v1)."""
+    """Full contract name (routeiq.router_decision.v1.1)."""
 
     event_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     """Unique identifier for this event."""
@@ -192,6 +230,10 @@ class RouterDecisionEvent:
 
     selection_reason: Optional[str] = None
     """Human-readable reason for selection."""
+
+    # === A/B Testing / Experiment Assignment (v1.1) ===
+    experiment: ExperimentAssignment = field(default_factory=ExperimentAssignment)
+    """Experiment assignment details for A/B testing analysis."""
 
     # === Performance Metrics ===
     timings: RoutingTimings = field(default_factory=RoutingTimings)
@@ -361,6 +403,30 @@ class RouterDecisionEventBuilder:
         )
         return self
 
+    def with_experiment(
+        self,
+        experiment_id: Optional[str] = None,
+        variant: Optional[str] = None,
+        strategy_name: Optional[str] = None,
+        strategy_version: Optional[str] = None,
+        weight: Optional[int] = None,
+        total_weight: Optional[int] = None,
+        hash_bucket: Optional[int] = None,
+        hash_key_type: Optional[str] = None,
+    ) -> "RouterDecisionEventBuilder":
+        """Set experiment assignment information for A/B testing."""
+        self._event.experiment = ExperimentAssignment(
+            experiment_id=experiment_id,
+            variant=variant,
+            strategy_name=strategy_name,
+            strategy_version=strategy_version,
+            weight=weight,
+            total_weight=total_weight,
+            hash_bucket=hash_bucket,
+            hash_key_type=hash_key_type,
+        )
+        return self
+
     def with_custom_attributes(
         self,
         attributes: Dict[str, Any],
@@ -400,9 +466,10 @@ def extract_router_decision_from_span_event(
         else:
             data = payload
 
-        # Validate contract version
-        if data.get("contract_name") != CONTRACT_FULL_NAME:
-            # Future: handle version migration
+        # Validate contract version (support backwards compatibility)
+        contract_version = data.get("contract_version", "v1")
+        if contract_version not in SUPPORTED_CONTRACT_VERSIONS:
+            # Unknown version
             return None
 
         # Reconstruct the event
@@ -471,6 +538,20 @@ def extract_router_decision_from_span_event(
                 original_model=f.get("original_model"),
                 fallback_reason=f.get("fallback_reason"),
                 fallback_attempt=f.get("fallback_attempt", 0),
+            )
+
+        # v1.1: Parse experiment assignment
+        if "experiment" in data:
+            e = data["experiment"]
+            event.experiment = ExperimentAssignment(
+                experiment_id=e.get("experiment_id"),
+                variant=e.get("variant"),
+                strategy_name=e.get("strategy_name"),
+                strategy_version=e.get("strategy_version"),
+                weight=e.get("weight"),
+                total_weight=e.get("total_weight"),
+                hash_bucket=e.get("hash_bucket"),
+                hash_key_type=e.get("hash_key_type"),
             )
 
         return event
