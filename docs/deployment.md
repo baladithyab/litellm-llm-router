@@ -141,8 +141,134 @@ spec:
             name: routeiq-config
 ```
 
-### Helm Chart Values
-(Coming soon)
+### Horizontal Pod Autoscaler (HPA)
+
+For production, use HPA to scale based on CPU/Memory or custom metrics.
+
+```yaml
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: routeiq-gateway-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: routeiq-gateway
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+```
+
+### Database Migration Job
+
+Run migrations separately, not on every replica, to avoid race conditions.
+
+```yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: routeiq-db-migrate
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-1"
+spec:
+  template:
+    spec:
+      containers:
+      - name: migrate
+        image: ghcr.io/baladithyab/litellm-llm-router:latest
+        command: ["/bin/bash", "-c"]
+        args:
+          - |
+            SCHEMA_PATH=$(python -c "import litellm; import os; print(os.path.join(os.path.dirname(litellm.__file__), 'proxy', 'schema.prisma'))")
+            if [ -f "$SCHEMA_PATH" ]; then
+              echo "Running migrations from $SCHEMA_PATH"
+              prisma migrate deploy --schema="$SCHEMA_PATH"
+            else
+              echo "Schema not found, skipping migrations"
+            fi
+        env:
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: routeiq-secrets
+              key: database-url
+      restartPolicy: Never
+  backoffLimit: 3
+```
+
+## High Availability & Scaling
+
+### Config Sync Leader Election
+
+When running multiple replicas, config sync from S3/GCS can cause issues like "thundering herd" (all replicas downloading at once) or conflicting updates.
+
+RouteIQ includes an optional **leader election** mechanism that ensures only one replica performs config sync at a time.
+
+#### HA Mode Setting
+
+RouteIQ supports two HA modes controlled by the `LLMROUTER_HA_MODE` environment variable:
+
+| Mode | Value | Description |
+|------|-------|-------------|
+| **Single** | `single` (default) | All instances sync independently. Use for single-instance deployments. |
+| **Leader Election** | `leader_election` | Only the elected leader performs config sync. Use for multi-replica HA deployments. |
+
+#### How It Works
+
+1. **Database-backed lease lock**: Uses PostgreSQL to coordinate across replicas
+2. **Lease-based with renewal**: Leader holds a lease that expires automatically if not renewed
+3. **Crash recovery**: If a leader crashes, the lease expires and another replica takes over
+4. **Non-blocking**: Non-leaders skip sync quietly without blocking
+
+#### Configuration
+
+Leader election is **automatically enabled** when `DATABASE_URL` is configured (HA mode).
+
+Set `LLMROUTER_HA_MODE=leader_election` to enable coordinated config sync:
+
+| Environment Variable | Default | Description |
+|---------------------|---------|-------------|
+| `LLMROUTER_HA_MODE` | `single` | HA mode: `single` or `leader_election` |
+| `LLMROUTER_CONFIG_SYNC_LEASE_SECONDS` | `30` | How long a leader holds the lock |
+| `LLMROUTER_CONFIG_SYNC_RENEW_INTERVAL_SECONDS` | `10` | How often to renew the lease |
+| `LLMROUTER_CONFIG_SYNC_LOCK_NAME` | `config_sync` | Lock name (for multiple independent locks) |
+
+### Monitoring Leader Election
+
+Check the config sync status endpoint to see leader election status:
+
+```bash
+curl http://localhost:4000/llmrouter/config/sync/status
+```
+
+Response includes:
+```json
+{
+  "enabled": true,
+  "running": true,
+  "leader_election": {
+    "enabled": true,
+    "is_leader": true,
+    "holder_id": "gateway-1-abc123",
+    "lease_expires_at": "2024-01-15T10:30:00Z",
+    "skipped_sync_count": 0
+  }
+}
+```
 
 ## Configuration Management
 

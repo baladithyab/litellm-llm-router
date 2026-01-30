@@ -122,6 +122,85 @@ The `llm_candidates.json` file describes available models for LLMRouter:
 }
 ```
 
+## Hot Reloading
+
+This guide explains how to update routing models without restarting the gateway.
+
+### Enabling Hot Reload
+
+Enable in your configuration:
+
+```yaml
+router_settings:
+  routing_strategy: llmrouter-knn
+  routing_strategy_args:
+    model_path: /app/models/knn_router.pt
+    hot_reload: true
+    reload_interval: 300  # seconds
+```
+
+### How It Works
+
+1. **File Monitoring**: The gateway checks the model file's modification time
+2. **Reload Trigger**: If the file changed since last check, reload is triggered
+3. **Thread-Safe Loading**: New model is loaded while old model handles requests
+4. **Atomic Swap**: Once loaded, requests switch to the new model
+
+### Updating Models
+
+#### Local Volume Mount
+
+If using volume mounts, simply replace the model file:
+
+```bash
+cp new_model.pt ./models/knn_router.pt
+```
+
+The gateway will detect the change within `reload_interval` seconds.
+
+#### S3-Based Updates
+
+For S3-stored models:
+
+1. Upload new model to S3:
+   ```bash
+   aws s3 cp new_model.pt s3://my-bucket/models/knn_router.pt
+   ```
+
+2. The gateway downloads and loads on next check
+
+#### API-Triggered Reload
+
+Force immediate reload via API:
+
+```bash
+curl -X POST http://localhost:4000/router/reload \
+  -H "Authorization: Bearer sk-master-key" \
+  -H "Content-Type: application/json" \
+  -d '{"strategy": "llmrouter-knn"}'
+```
+
+### Configuration Reload
+
+Reload entire config without restart:
+
+```bash
+curl -X POST http://localhost:4000/config/reload \
+  -H "Authorization: Bearer sk-master-key"
+```
+
+### Best Practices
+
+1. **Test Before Deploy**: Always test new models in staging.
+2. **Monitor After Reload**: Watch metrics after model updates (`curl http://localhost:4000/metrics | grep llmrouter`).
+3. **Keep Rollback Ready**: Maintain previous model version.
+4. **Use Version Tags**: Tag model versions in S3.
+
+### Troubleshooting
+
+- **Model Not Reloading**: Check file permissions and `hot_reload: true`.
+- **Reload Errors**: Check logs for format compatibility or missing dependencies.
+
 ## Configuring Anthropic Skills
 
 To use Anthropic Skills (Computer Use, etc.), configure a model with your Anthropic API key.

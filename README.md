@@ -32,7 +32,7 @@ RouteIQ Gateway unifies multiple AI interaction patterns under a single endpoint
 | **Skills** | 🟡 **Beta** | Anthropic Computer Use, Bash, and Text Editor skills. |
 | **Vector Stores** | 🔴 **Experimental** | Inherited OpenAI endpoints; deep external DB integration planned. |
 
-See [Feature Parity & Roadmap](docs/parity-roadmap.md) for details.
+See [Feature Parity & Roadmap](plans/parity-roadmap.md) for details.
 
 ## Architecture
 
@@ -55,8 +55,8 @@ The gateway operates as the central nervous system for your AI infrastructure, o
 | Goal | Recommended Setup |
 |------|-------------------|
 | **"I just want to try it out."** | [**Basic Docker Compose**](docs/quickstart-docker-compose.md) <br> *Simple, single container, local config.* |
-| **"I need production reliability."** | [**High Availability (HA)**](docs/quickstart-ha-compose.md) <br> *Multi-replica, Redis/Postgres backed, Nginx load balancing.* |
-| **"I need to debug or optimize."** | [**Observability Stack**](docs/quickstart-otel-compose.md) <br> *Includes Jaeger for full trace visualization.* |
+| **"I need production reliability."** | [**High Availability (HA)**](docs/tutorials/ha-quickstart.md) <br> *Multi-replica, Redis/Postgres backed, Nginx load balancing.* |
+| **"I need to debug or optimize."** | [**Observability Stack**](docs/tutorials/observability-quickstart.md) <br> *Includes Jaeger for full trace visualization.* |
 
 ### 1. Docker Compose (Basic)
 
@@ -80,7 +80,7 @@ Includes Redis and PostgreSQL for state and caching.
 docker-compose -f docker-compose.ha.yml up -d
 ```
 
-[View HA Quickstart](docs/quickstart-ha-compose.md)
+[View HA Quickstart](docs/tutorials/ha-quickstart.md)
 
 ### 3. Observability (OTel + Jaeger)
 
@@ -90,7 +90,7 @@ Includes Jaeger for full trace visualization.
 docker-compose -f docker-compose.otel.yml up -d
 ```
 
-[View Observability Quickstart](docs/quickstart-otel-compose.md)
+[View Observability Quickstart](docs/tutorials/observability-quickstart.md)
 
 ## Deployment
 
@@ -106,35 +106,36 @@ RouteIQ Gateway is designed for cloud-native deployment:
 
 ## Production Checklist
 
-Before going to production, ensure you have addressed the following:
+See the [Deployment Guide](docs/deployment.md) for a comprehensive production checklist, including:
 
-- [ ] **Security**: Generate a strong `LITELLM_MASTER_KEY` and rotate it regularly.
-- [ ] **Persistence**: Use external PostgreSQL and Redis instances for state and caching (don't use containers for data in prod).
-- [ ] **TLS/SSL**: Terminate SSL at your load balancer (Nginx, AWS ALB, or K8s Ingress).
-- [ ] **Observability**: Configure an OTel collector to capture traces and metrics.
-- [ ] **MCP Security**: If using MCP, explicitly enable tool invocation via `LLMROUTER_ENABLE_MCP_TOOL_INVOCATION=true` only if trusted.
-- [ ] **Resource Limits**: Set appropriate CPU/Memory requests and limits in Kubernetes.
+- Security & Key Management
+- Persistence (PostgreSQL/Redis)
+- TLS/SSL Termination
+- Observability Setup
+- Resource Limits & Scaling
 
 ## Security
 
 Security is a first-class citizen in RouteIQ Gateway:
 
 - **SSRF Protection**: Built-in guards against Server-Side Request Forgery.
-- **Artifact Safety**: Pickle loading for ML models is **disabled by default** (opt-in only) to prevent arbitrary code execution. Use `LLMROUTER_ALLOW_PICKLE_MODELS=true` to enable if necessary.
-- **Key Management**: Secure handling of API keys via environment variables or secret managers.
-- **Kubernetes Security**: Recommended security contexts (non-root user, read-only root filesystem) included in deployment examples.
+- **Artifact Safety**: Pickle loading for ML models is **disabled by default** (opt-in only).
+- **Key Management**: Secure handling of API keys.
+- **Kubernetes Security**: Recommended security contexts included in deployment examples.
+
+See the [Security Guide](docs/security.md) for details.
 
 ## Documentation
 
 | Document | Description |
 |----------|-------------|
 | [Getting Started](docs/index.md) | Comprehensive guide to setting up and using the gateway. |
-| [Feature Parity & Roadmap](docs/parity-roadmap.md) | Status of features vs. LiteLLM and future plans. |
+| [Deployment Guide](docs/deployment.md) | Docker, Kubernetes, and Cloud deployment patterns. |
+| [Configuration Guide](docs/configuration.md) | Configuration options and Hot Reloading. |
 | [API Reference](docs/api-reference.md) | Detailed API documentation. |
 | [Routing Strategies](docs/routing-strategies.md) | Explanation of available routing strategies. |
 | [MLOps Training](docs/mlops-training.md) | Guide to the MLOps training loop. |
 | [MCP Gateway](docs/mcp-gateway.md) | Using the Model Context Protocol. |
-| [Skills Gateway](docs/skills-gateway.md) | Registering and using skills. |
 
 ## Supported Routing Strategies
 
