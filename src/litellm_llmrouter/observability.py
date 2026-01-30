@@ -71,9 +71,10 @@ def _get_sampler_from_env() -> Sampler:
     """
     Build a Sampler based on environment variables.
 
-    This function honors OTEL standard env vars and a custom LLMROUTER_OTEL_SAMPLE_RATE:
+    This function honors multiple env var sources with the following priority:
 
-    1. If OTEL_TRACES_SAMPLER is set, use the standard OTEL sampler configuration:
+    1. OTEL Standard (highest priority):
+       If OTEL_TRACES_SAMPLER is set, use the standard OTEL sampler configuration:
        - "always_on": Sample all traces
        - "always_off": Sample no traces
        - "traceidratio": Sample based on OTEL_TRACES_SAMPLER_ARG (ratio 0.0-1.0)
@@ -81,15 +82,21 @@ def _get_sampler_from_env() -> Sampler:
        - "parentbased_always_off": Parent-based with always_off root
        - "parentbased_traceidratio": Parent-based with ratio-based root
 
-    2. If LLMROUTER_OTEL_SAMPLE_RATE is set (0.0-1.0), use a parent-based ratio sampler.
+    2. RouteIQ-specific (recommended for production):
+       If ROUTEIQ_OTEL_TRACES_SAMPLER is set (or defaults apply), use the sampler type
+       with ROUTEIQ_OTEL_TRACES_SAMPLER_ARG for ratio-based samplers.
+       Defaults: sampler=parentbased_traceidratio, arg=0.1 (10% sampling)
+
+    3. Legacy LLMROUTER (deprecated, for backwards compatibility):
+       If LLMROUTER_OTEL_SAMPLE_RATE is set (0.0-1.0), use a parent-based ratio sampler.
        This is a convenience for simple percentage-based sampling.
 
-    3. Default: Always sample (1.0 / 100%) for backwards compatibility.
+    4. Default: Use RouteIQ defaults (parentbased_traceidratio with 10% sampling)
 
     Returns:
         Configured Sampler instance
     """
-    # Check OTEL standard env var first
+    # Check OTEL standard env var first (highest priority)
     otel_sampler = os.getenv("OTEL_TRACES_SAMPLER", "").lower()
 
     if otel_sampler:
@@ -137,27 +144,102 @@ def _get_sampler_from_env() -> Sampler:
 
         else:
             logger.warning(
-                f"Unknown OTEL_TRACES_SAMPLER '{otel_sampler}', falling back to default"
+                f"Unknown OTEL_TRACES_SAMPLER '{otel_sampler}', falling back to RouteIQ defaults"
             )
 
-    # Check custom LLMROUTER env var for simple ratio-based sampling
+    # Check RouteIQ-specific env vars (recommended for production)
+    # Default: parentbased_traceidratio with 0.1 (10% sampling)
+    routeiq_sampler = os.getenv("ROUTEIQ_OTEL_TRACES_SAMPLER", "").lower()
+    routeiq_sampler_arg = os.getenv("ROUTEIQ_OTEL_TRACES_SAMPLER_ARG", "")
+
+    # Check legacy LLMROUTER env var (deprecated, for backwards compatibility)
     llmrouter_sample_rate = os.getenv("LLMROUTER_OTEL_SAMPLE_RATE", "")
+
+    if routeiq_sampler or routeiq_sampler_arg:
+        # RouteIQ env vars are explicitly set - use them
+        sampler_type = routeiq_sampler or "parentbased_traceidratio"
+        sampler_arg = routeiq_sampler_arg or "0.1"
+
+        return _build_sampler_from_type(
+            sampler_type, sampler_arg, prefix="ROUTEIQ_OTEL_TRACES_SAMPLER"
+        )
+
     if llmrouter_sample_rate:
+        # Legacy env var is set - use it
         try:
             ratio = float(llmrouter_sample_rate)
             ratio = max(0.0, min(1.0, ratio))  # Clamp to valid range
-            logger.info(f"Using LLMROUTER_OTEL_SAMPLE_RATE: {ratio}")
+            logger.info(
+                f"Using LLMROUTER_OTEL_SAMPLE_RATE: {ratio} (deprecated, use ROUTEIQ_OTEL_TRACES_SAMPLER_ARG)"
+            )
             # Use ParentBased to respect incoming trace decisions
             return ParentBased(root=TraceIdRatioBased(ratio))
         except ValueError:
             logger.warning(
                 f"Invalid LLMROUTER_OTEL_SAMPLE_RATE '{llmrouter_sample_rate}', "
-                "using default (1.0)"
+                "using RouteIQ defaults"
             )
 
-    # Default: sample everything (backwards compatible)
-    logger.debug("Using default sampler: ParentBased(always_on)")
-    return ParentBased(root=ALWAYS_ON)
+    # Default: Use RouteIQ production defaults (10% sampling with parentbased_traceidratio)
+    logger.info("Using RouteIQ default sampler: parentbased_traceidratio (0.1)")
+    return ParentBased(root=TraceIdRatioBased(0.1))
+
+
+def _build_sampler_from_type(
+    sampler_type: str, sampler_arg: str, prefix: str
+) -> Sampler:
+    """
+    Build a Sampler from a sampler type string and argument.
+
+    Args:
+        sampler_type: The sampler type (e.g., "always_on", "parentbased_traceidratio")
+        sampler_arg: The sampler argument (e.g., "0.1" for ratio-based samplers)
+        prefix: The env var prefix for logging (e.g., "ROUTEIQ_OTEL_TRACES_SAMPLER")
+
+    Returns:
+        Configured Sampler instance
+    """
+    if sampler_type == "always_on":
+        logger.info(f"Using {prefix}: always_on")
+        return ALWAYS_ON
+
+    elif sampler_type == "always_off":
+        logger.info(f"Using {prefix}: always_off")
+        return ALWAYS_OFF
+
+    elif sampler_type == "traceidratio":
+        try:
+            ratio = float(sampler_arg) if sampler_arg else 0.1
+            ratio = max(0.0, min(1.0, ratio))
+        except ValueError:
+            logger.warning(f"Invalid {prefix}_ARG '{sampler_arg}', using 0.1")
+            ratio = 0.1
+        logger.info(f"Using {prefix}: traceidratio ({ratio})")
+        return TraceIdRatioBased(ratio)
+
+    elif sampler_type == "parentbased_always_on":
+        logger.info(f"Using {prefix}: parentbased_always_on")
+        return ParentBased(root=ALWAYS_ON)
+
+    elif sampler_type == "parentbased_always_off":
+        logger.info(f"Using {prefix}: parentbased_always_off")
+        return ParentBased(root=ALWAYS_OFF)
+
+    elif sampler_type == "parentbased_traceidratio":
+        try:
+            ratio = float(sampler_arg) if sampler_arg else 0.1
+            ratio = max(0.0, min(1.0, ratio))
+        except ValueError:
+            logger.warning(f"Invalid {prefix}_ARG '{sampler_arg}', using 0.1")
+            ratio = 0.1
+        logger.info(f"Using {prefix}: parentbased_traceidratio ({ratio})")
+        return ParentBased(root=TraceIdRatioBased(ratio))
+
+    else:
+        logger.warning(
+            f"Unknown {prefix} '{sampler_type}', using parentbased_traceidratio (0.1)"
+        )
+        return ParentBased(root=TraceIdRatioBased(0.1))
 
 
 class ObservabilityManager:

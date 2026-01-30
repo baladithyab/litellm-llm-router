@@ -227,15 +227,110 @@ environment:
 
 ---
 
+## Exporter Options
+
+RouteIQ Gateway supports the following environment variables for configuring OpenTelemetry exporters. These control how traces, metrics, and logs are sent to your observability backend.
+
+### Core Exporter Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4317` | OTLP collector endpoint (gRPC or HTTP) |
+| `OTEL_EXPORTER_OTLP_PROTOCOL` | `grpc` | Protocol: `grpc`, `http/protobuf`, or `http/json` |
+| `OTEL_EXPORTER_OTLP_HEADERS` | _(none)_ | Headers for auth/routing (format: `key1=value1,key2=value2`) |
+| `OTEL_EXPORTER_OTLP_TIMEOUT` | `10000` | Exporter timeout in milliseconds |
+| `OTEL_EXPORTER_OTLP_COMPRESSION` | _(none)_ | Compression: `gzip` or `none` |
+
+### Service Identity
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OTEL_SERVICE_NAME` | `litellm-gateway` | Service name shown in traces/metrics |
+| `OTEL_SERVICE_VERSION` | `1.0.0` | Service version attribute |
+| `OTEL_DEPLOYMENT_ENVIRONMENT` | `production` | Deployment environment (production, staging, dev) |
+
+### Exporter Selection
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OTEL_TRACES_EXPORTER` | `otlp` | Trace exporter: `otlp`, `jaeger`, `zipkin`, or `none` |
+| `OTEL_METRICS_EXPORTER` | `otlp` | Metrics exporter: `otlp`, `prometheus`, or `none` |
+| `OTEL_LOGS_EXPORTER` | `otlp` | Logs exporter: `otlp` or `none` |
+
+### Sampling Configuration (RouteIQ)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ROUTEIQ_OTEL_TRACES_SAMPLER` | `parentbased_traceidratio` | Sampler type (see [Trace Sampling](#trace-sampling-configuration)) |
+| `ROUTEIQ_OTEL_TRACES_SAMPLER_ARG` | `0.1` | Sampling ratio for ratio-based samplers (0.0-1.0) |
+
+### TLS Configuration (for secure endpoints)
+
+| Variable | Description |
+|----------|-------------|
+| `OTEL_EXPORTER_OTLP_CERTIFICATE` | Path to CA certificate file |
+| `OTEL_EXPORTER_OTLP_CLIENT_KEY` | Path to client private key file (mTLS) |
+| `OTEL_EXPORTER_OTLP_CLIENT_CERTIFICATE` | Path to client certificate file (mTLS) |
+
+### Example: Full Production Configuration
+
+```yaml
+environment:
+  # Endpoint and protocol
+  - OTEL_EXPORTER_OTLP_ENDPOINT=https://otel-collector.internal:4317
+  - OTEL_EXPORTER_OTLP_PROTOCOL=grpc
+  - OTEL_EXPORTER_OTLP_COMPRESSION=gzip
+  
+  # Authentication headers (for SaaS backends like Honeycomb, Grafana Cloud)
+  - OTEL_EXPORTER_OTLP_HEADERS=x-honeycomb-team=your-api-key
+  
+  # Service identity
+  - OTEL_SERVICE_NAME=routeiq-gateway
+  - OTEL_SERVICE_VERSION=2.1.0
+  - OTEL_DEPLOYMENT_ENVIRONMENT=production
+  
+  # Sampling (10% of traces in production)
+  - ROUTEIQ_OTEL_TRACES_SAMPLER=parentbased_traceidratio
+  - ROUTEIQ_OTEL_TRACES_SAMPLER_ARG=0.1
+```
+
+---
+
 ## Trace Sampling Configuration
 
 In high-traffic production environments, sampling all traces can be expensive (storage, network, processing). RouteIQ Gateway supports configurable trace sampling to control the volume of exported traces.
 
+### Default Behavior (Production-Ready)
+
+By default, RouteIQ Gateway samples **10% of traces** using `parentbased_traceidratio`. This is suitable for production environments and avoids overwhelming your tracing backend.
+
+To sample 100% of traces (e.g., for development), explicitly set:
+```yaml
+environment:
+  - ROUTEIQ_OTEL_TRACES_SAMPLER=parentbased_always_on
+```
+
 ### Sampling Options
 
-#### Option 1: OTEL Standard Environment Variables (Recommended)
+#### Option 1: RouteIQ Environment Variables (Recommended)
 
-Use standard OpenTelemetry environment variables for maximum portability:
+Use RouteIQ-specific environment variables for production deployments:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ROUTEIQ_OTEL_TRACES_SAMPLER` | `parentbased_traceidratio` | Sampler type (see below) |
+| `ROUTEIQ_OTEL_TRACES_SAMPLER_ARG` | `0.1` | Argument for ratio-based samplers (0.0-1.0) |
+
+**Example: Sample 5% of traces**
+```yaml
+environment:
+  - ROUTEIQ_OTEL_TRACES_SAMPLER=parentbased_traceidratio
+  - ROUTEIQ_OTEL_TRACES_SAMPLER_ARG=0.05
+```
+
+#### Option 2: OTEL Standard Environment Variables
+
+For maximum portability, use standard OpenTelemetry environment variables (takes precedence over RouteIQ vars):
 
 | Variable | Description |
 |----------|-------------|
@@ -246,31 +341,38 @@ Use standard OpenTelemetry environment variables for maximum portability:
 
 | Sampler | Description |
 |---------|-------------|
-| `always_on` | Sample 100% of traces (default) |
+| `always_on` | Sample 100% of traces |
 | `always_off` | Sample 0% of traces |
 | `traceidratio` | Sample based on trace ID ratio |
 | `parentbased_always_on` | Respect parent sampling decision, default to always_on |
 | `parentbased_always_off` | Respect parent sampling decision, default to always_off |
 | `parentbased_traceidratio` | Respect parent sampling decision, default to ratio (recommended) |
 
-**Example: Sample 10% of traces in production**
+**Example: Sample 10% of traces using OTEL standard**
 ```yaml
 environment:
   - OTEL_TRACES_SAMPLER=parentbased_traceidratio
   - OTEL_TRACES_SAMPLER_ARG=0.1
 ```
 
-#### Option 2: Simple Rate Configuration
+#### Option 3: Legacy Simple Rate Configuration
 
-For convenience, use `LLMROUTER_OTEL_SAMPLE_RATE` for simple percentage-based sampling:
+For backwards compatibility, `LLMROUTER_OTEL_SAMPLE_RATE` is still supported but deprecated:
 
 ```yaml
 environment:
-  # Sample 10% of traces
+  # Sample 10% of traces (deprecated - use ROUTEIQ_OTEL_TRACES_SAMPLER_ARG instead)
   - LLMROUTER_OTEL_SAMPLE_RATE=0.1
 ```
 
-This is equivalent to `parentbased_traceidratio` with the specified rate.
+### Environment Variable Priority
+
+When multiple env vars are set, the priority order is:
+
+1. **OTEL_TRACES_SAMPLER** (highest - OTEL standard)
+2. **ROUTEIQ_OTEL_TRACES_SAMPLER** (recommended for RouteIQ)
+3. **LLMROUTER_OTEL_SAMPLE_RATE** (legacy, deprecated)
+4. **Default** (parentbased_traceidratio with 0.1)
 
 ### Sampling Best Practices
 
@@ -473,3 +575,12 @@ environment:
 ### High trace volume / costs
 1. Enable sampling: `LLMROUTER_OTEL_SAMPLE_RATE=0.1` (10%)
 2. Use `parentbased_traceidratio` to respect upstream decisions
+
+### TLS/Authentication Issues
+1. Verify all TLS/mtls environment variables (`_CERTIFICATE`, `_CLIENT_KEY`...) are set/correct
+2. Check service authentication headers (e.g., `OTEL_EXPORTER_OTLP_HEADERS`)
+
+### Exporter Endpoint Timeout/Reachability
+1. Set `OTEL_EXPORTER_OTLP_TIMEOUT` to a higher value (in milliseconds)
+2. Validate endpoint availability from the gateway containers
+:red:

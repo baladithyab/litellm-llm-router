@@ -402,6 +402,66 @@ class TestObservabilityConfiguration:
 # Import the _get_sampler_from_env function
 _get_sampler_from_env = observability._get_sampler_from_env
 
+# Import the _build_sampler_from_type function
+_build_sampler_from_type = observability._build_sampler_from_type
+
+
+class TestBuildSamplerFromType:
+    """Test suite for _build_sampler_from_type helper function."""
+
+    def test_always_on(self):
+        """Test building always_on sampler."""
+        sampler = _build_sampler_from_type("always_on", "", "TEST")
+        assert sampler is ALWAYS_ON
+
+    def test_always_off(self):
+        """Test building always_off sampler."""
+        sampler = _build_sampler_from_type("always_off", "", "TEST")
+        assert sampler is ALWAYS_OFF
+
+    def test_traceidratio_with_arg(self):
+        """Test building traceidratio sampler with valid arg."""
+        sampler = _build_sampler_from_type("traceidratio", "0.5", "TEST")
+        assert isinstance(sampler, TraceIdRatioBased)
+        assert sampler._rate == 0.5
+
+    def test_traceidratio_default_arg(self):
+        """Test building traceidratio sampler defaults to 0.1."""
+        sampler = _build_sampler_from_type("traceidratio", "", "TEST")
+        assert isinstance(sampler, TraceIdRatioBased)
+        assert sampler._rate == 0.1
+
+    def test_traceidratio_invalid_arg(self):
+        """Test building traceidratio sampler with invalid arg defaults to 0.1."""
+        sampler = _build_sampler_from_type("traceidratio", "invalid", "TEST")
+        assert isinstance(sampler, TraceIdRatioBased)
+        assert sampler._rate == 0.1
+
+    def test_parentbased_always_on(self):
+        """Test building parentbased_always_on sampler."""
+        sampler = _build_sampler_from_type("parentbased_always_on", "", "TEST")
+        assert isinstance(sampler, ParentBased)
+
+    def test_parentbased_always_off(self):
+        """Test building parentbased_always_off sampler."""
+        sampler = _build_sampler_from_type("parentbased_always_off", "", "TEST")
+        assert isinstance(sampler, ParentBased)
+
+    def test_parentbased_traceidratio_with_arg(self):
+        """Test building parentbased_traceidratio sampler with valid arg."""
+        sampler = _build_sampler_from_type("parentbased_traceidratio", "0.25", "TEST")
+        assert isinstance(sampler, ParentBased)
+
+    def test_parentbased_traceidratio_default_arg(self):
+        """Test building parentbased_traceidratio sampler defaults to 0.1."""
+        sampler = _build_sampler_from_type("parentbased_traceidratio", "", "TEST")
+        assert isinstance(sampler, ParentBased)
+
+    def test_unknown_sampler_type(self):
+        """Test unknown sampler type falls back to parentbased_traceidratio(0.1)."""
+        sampler = _build_sampler_from_type("unknown", "", "TEST")
+        assert isinstance(sampler, ParentBased)
+
 
 class TestSamplerConfiguration:
     """Test suite for trace sampler configuration."""
@@ -568,6 +628,110 @@ class TestSamplerConfiguration:
         ):
             sampler = _get_sampler_from_env()
             assert sampler is ALWAYS_ON
+
+    # --- ROUTEIQ_OTEL_TRACES_SAMPLER tests ---
+
+    def test_routeiq_sampler_always_on(self):
+        """Test ROUTEIQ_OTEL_TRACES_SAMPLER=always_on."""
+        with patch.dict(
+            os.environ,
+            {"ROUTEIQ_OTEL_TRACES_SAMPLER": "always_on"},
+            clear=True,
+        ):
+            sampler = _get_sampler_from_env()
+            assert sampler is ALWAYS_ON
+
+    def test_routeiq_sampler_always_off(self):
+        """Test ROUTEIQ_OTEL_TRACES_SAMPLER=always_off."""
+        with patch.dict(
+            os.environ,
+            {"ROUTEIQ_OTEL_TRACES_SAMPLER": "always_off"},
+            clear=True,
+        ):
+            sampler = _get_sampler_from_env()
+            assert sampler is ALWAYS_OFF
+
+    def test_routeiq_sampler_parentbased_traceidratio_with_arg(self):
+        """Test ROUTEIQ_OTEL_TRACES_SAMPLER=parentbased_traceidratio with arg."""
+        with patch.dict(
+            os.environ,
+            {
+                "ROUTEIQ_OTEL_TRACES_SAMPLER": "parentbased_traceidratio",
+                "ROUTEIQ_OTEL_TRACES_SAMPLER_ARG": "0.25",
+            },
+            clear=True,
+        ):
+            sampler = _get_sampler_from_env()
+            assert isinstance(sampler, ParentBased)
+
+    def test_routeiq_sampler_arg_only_uses_default_sampler(self):
+        """Test ROUTEIQ_OTEL_TRACES_SAMPLER_ARG alone uses default sampler type."""
+        with patch.dict(
+            os.environ,
+            {"ROUTEIQ_OTEL_TRACES_SAMPLER_ARG": "0.05"},
+            clear=True,
+        ):
+            sampler = _get_sampler_from_env()
+            # Should use default sampler type (parentbased_traceidratio) with the arg
+            assert isinstance(sampler, ParentBased)
+
+    def test_routeiq_sampler_traceidratio(self):
+        """Test ROUTEIQ_OTEL_TRACES_SAMPLER=traceidratio."""
+        with patch.dict(
+            os.environ,
+            {
+                "ROUTEIQ_OTEL_TRACES_SAMPLER": "traceidratio",
+                "ROUTEIQ_OTEL_TRACES_SAMPLER_ARG": "0.3",
+            },
+            clear=True,
+        ):
+            sampler = _get_sampler_from_env()
+            assert isinstance(sampler, TraceIdRatioBased)
+            assert sampler._rate == 0.3
+
+    def test_routeiq_sampler_unknown_falls_back(self):
+        """Test ROUTEIQ_OTEL_TRACES_SAMPLER with unknown value falls back."""
+        with patch.dict(
+            os.environ,
+            {"ROUTEIQ_OTEL_TRACES_SAMPLER": "unknown_sampler"},
+            clear=True,
+        ):
+            sampler = _get_sampler_from_env()
+            # Falls back to parentbased_traceidratio(0.1)
+            assert isinstance(sampler, ParentBased)
+
+    def test_otel_takes_precedence_over_routeiq(self):
+        """Test OTEL_TRACES_SAMPLER takes precedence over ROUTEIQ_OTEL_TRACES_SAMPLER."""
+        with patch.dict(
+            os.environ,
+            {
+                "OTEL_TRACES_SAMPLER": "always_on",
+                "ROUTEIQ_OTEL_TRACES_SAMPLER": "always_off",
+            },
+            clear=True,
+        ):
+            sampler = _get_sampler_from_env()
+            assert sampler is ALWAYS_ON
+
+    def test_routeiq_takes_precedence_over_llmrouter(self):
+        """Test ROUTEIQ_OTEL_TRACES_SAMPLER takes precedence over LLMROUTER_OTEL_SAMPLE_RATE."""
+        with patch.dict(
+            os.environ,
+            {
+                "ROUTEIQ_OTEL_TRACES_SAMPLER": "always_off",
+                "LLMROUTER_OTEL_SAMPLE_RATE": "1.0",
+            },
+            clear=True,
+        ):
+            sampler = _get_sampler_from_env()
+            assert sampler is ALWAYS_OFF
+
+    def test_default_is_parentbased_traceidratio_10_percent(self):
+        """Test default sampler is parentbased_traceidratio with 0.1 (10%)."""
+        with patch.dict(os.environ, {}, clear=True):
+            sampler = _get_sampler_from_env()
+            # Default is ParentBased(TraceIdRatioBased(0.1))
+            assert isinstance(sampler, ParentBased)
 
 
 class TestObservabilityManagerSampler:
