@@ -763,3 +763,392 @@ class TestAdminAuthUnit:
         # Should NOT contain the sensitive info
         assert "postgres" not in str(result)
         assert "user:pass" not in str(result)
+
+
+# =============================================================================
+# Admin vs User Auth Boundary Tests
+# =============================================================================
+
+
+@pytest.fixture
+def app_with_both_routers():
+    """
+    Create an app with both user-auth (llmrouter) and admin-auth routers.
+
+    This tests that user API keys cannot access admin-protected endpoints.
+    """
+    from fastapi import APIRouter, Depends, HTTPException, Request
+    from litellm_llmrouter.routes import health_router
+    from litellm_llmrouter.auth import admin_api_key_auth, RequestIDMiddleware
+
+    # Mock user auth that accepts any Bearer token as valid user key
+    async def mock_user_api_key_auth(request: Request):
+        auth_header = request.headers.get("authorization", "")
+        if not auth_header.startswith("Bearer ") or auth_header == "Bearer ":
+            raise HTTPException(
+                status_code=401, detail={"error": "Invalid or missing API key"}
+            )
+        return {"api_key": auth_header.split(" ")[1]}
+
+    # User-auth router (data-plane)
+    user_router = APIRouter(
+        tags=["user"],
+        dependencies=[Depends(mock_user_api_key_auth)],
+    )
+
+    @user_router.get("/router/info")
+    async def get_router_info():
+        """Data-plane: get router info - user auth sufficient."""
+        return {"status": "ok", "type": "data-plane"}
+
+    @user_router.get("/llmrouter/mcp/servers")
+    async def list_mcp_servers():
+        """Data-plane: list MCP servers (read-only) - user auth sufficient."""
+        return {"servers": [], "type": "data-plane"}
+
+    @user_router.get("/a2a/agents")
+    async def list_agents():
+        """Data-plane: list agents (read-only) - user auth sufficient."""
+        return {"agents": [], "type": "data-plane"}
+
+    # Admin-auth router (control-plane)
+    admin_router = APIRouter(
+        tags=["admin"],
+        dependencies=[Depends(admin_api_key_auth)],
+    )
+
+    @admin_router.post("/config/reload")
+    async def reload_config():
+        """Control-plane: reload config - admin auth required."""
+        return {"status": "reloaded", "type": "control-plane"}
+
+    @admin_router.post("/llmrouter/reload")
+    async def reload_llmrouter():
+        """Control-plane: reload llmrouter - admin auth required."""
+        return {"status": "reloaded", "type": "control-plane"}
+
+    @admin_router.post("/llmrouter/mcp/servers")
+    async def register_mcp_server():
+        """Control-plane: register MCP server - admin auth required."""
+        return {"status": "registered", "type": "control-plane"}
+
+    @admin_router.delete("/llmrouter/mcp/servers/{server_id}")
+    async def unregister_mcp_server(server_id: str):
+        """Control-plane: unregister MCP server - admin auth required."""
+        return {
+            "status": "unregistered",
+            "server_id": server_id,
+            "type": "control-plane",
+        }
+
+    @admin_router.put("/llmrouter/mcp/servers/{server_id}")
+    async def update_mcp_server(server_id: str):
+        """Control-plane: update MCP server - admin auth required."""
+        return {"status": "updated", "server_id": server_id, "type": "control-plane"}
+
+    @admin_router.post("/llmrouter/mcp/tools/call")
+    async def call_mcp_tool():
+        """Control-plane: invoke MCP tool - admin auth required."""
+        return {"status": "invoked", "type": "control-plane"}
+
+    @admin_router.post("/llmrouter/mcp/servers/{server_id}/tools")
+    async def register_mcp_tool(server_id: str):
+        """Control-plane: register MCP tool - admin auth required."""
+        return {"status": "registered", "server_id": server_id, "type": "control-plane"}
+
+    @admin_router.post("/a2a/agents")
+    async def register_agent():
+        """Control-plane: register A2A agent - admin auth required."""
+        return {"status": "registered", "type": "control-plane"}
+
+    @admin_router.delete("/agents/{agent_id}")
+    async def unregister_agent(agent_id: str):
+        """Control-plane: unregister A2A agent - admin auth required."""
+        return {"status": "unregistered", "agent_id": agent_id, "type": "control-plane"}
+
+    app = FastAPI()
+    app.add_middleware(RequestIDMiddleware)
+    app.include_router(health_router)
+    app.include_router(user_router)
+    app.include_router(admin_router)
+    return app
+
+
+class TestUserCannotAccessControlPlane:
+    """
+    Tests verifying that regular user API keys CANNOT access control-plane endpoints.
+
+    Control-plane endpoints require admin API keys and must reject user keys.
+    """
+
+    @pytest.fixture(autouse=True)
+    def setup_env(self):
+        """Set up admin key for tests."""
+        env_backup = {
+            "ADMIN_API_KEYS": os.environ.pop("ADMIN_API_KEYS", None),
+            "ADMIN_API_KEY": os.environ.pop("ADMIN_API_KEY", None),
+            "ADMIN_AUTH_ENABLED": os.environ.pop("ADMIN_AUTH_ENABLED", None),
+        }
+        os.environ["ADMIN_API_KEYS"] = "admin-key-12345"
+
+        yield
+
+        for key, val in env_backup.items():
+            if val is not None:
+                os.environ[key] = val
+            elif key in os.environ:
+                del os.environ[key]
+
+    def test_user_key_can_access_data_plane_router_info(self, app_with_both_routers):
+        """User API key CAN access data-plane GET /router/info."""
+        client = TestClient(app_with_both_routers)
+        response = client.get(
+            "/router/info",
+            headers={"Authorization": "Bearer user-key-12345"},
+        )
+        assert response.status_code == 200
+        assert response.json()["type"] == "data-plane"
+
+    def test_user_key_can_access_data_plane_list_servers(self, app_with_both_routers):
+        """User API key CAN access data-plane GET /llmrouter/mcp/servers."""
+        client = TestClient(app_with_both_routers)
+        response = client.get(
+            "/llmrouter/mcp/servers",
+            headers={"Authorization": "Bearer user-key-12345"},
+        )
+        assert response.status_code == 200
+        assert response.json()["type"] == "data-plane"
+
+    def test_user_key_can_access_data_plane_list_agents(self, app_with_both_routers):
+        """User API key CAN access data-plane GET /a2a/agents."""
+        client = TestClient(app_with_both_routers)
+        response = client.get(
+            "/a2a/agents",
+            headers={"Authorization": "Bearer user-key-12345"},
+        )
+        assert response.status_code == 200
+        assert response.json()["type"] == "data-plane"
+
+    def test_user_key_cannot_access_config_reload(self, app_with_both_routers):
+        """User API key CANNOT access control-plane POST /config/reload."""
+        client = TestClient(app_with_both_routers, raise_server_exceptions=False)
+        response = client.post(
+            "/config/reload",
+            headers={"Authorization": "Bearer user-key-12345"},
+        )
+        assert response.status_code == 401
+        assert response.json()["detail"]["error"] == "invalid_admin_key"
+
+    def test_user_key_cannot_access_llmrouter_reload(self, app_with_both_routers):
+        """User API key CANNOT access control-plane POST /llmrouter/reload."""
+        client = TestClient(app_with_both_routers, raise_server_exceptions=False)
+        response = client.post(
+            "/llmrouter/reload",
+            headers={"Authorization": "Bearer user-key-12345"},
+        )
+        assert response.status_code == 401
+        assert response.json()["detail"]["error"] == "invalid_admin_key"
+
+    def test_user_key_cannot_register_mcp_server(self, app_with_both_routers):
+        """User API key CANNOT access control-plane POST /llmrouter/mcp/servers."""
+        client = TestClient(app_with_both_routers, raise_server_exceptions=False)
+        response = client.post(
+            "/llmrouter/mcp/servers",
+            headers={"Authorization": "Bearer user-key-12345"},
+            json={"server_id": "test", "name": "test", "url": "http://test.com"},
+        )
+        assert response.status_code == 401
+        assert response.json()["detail"]["error"] == "invalid_admin_key"
+
+    def test_user_key_cannot_delete_mcp_server(self, app_with_both_routers):
+        """User API key CANNOT access control-plane DELETE /llmrouter/mcp/servers/{id}."""
+        client = TestClient(app_with_both_routers, raise_server_exceptions=False)
+        response = client.delete(
+            "/llmrouter/mcp/servers/test-server",
+            headers={"Authorization": "Bearer user-key-12345"},
+        )
+        assert response.status_code == 401
+        assert response.json()["detail"]["error"] == "invalid_admin_key"
+
+    def test_user_key_cannot_update_mcp_server(self, app_with_both_routers):
+        """User API key CANNOT access control-plane PUT /llmrouter/mcp/servers/{id}."""
+        client = TestClient(app_with_both_routers, raise_server_exceptions=False)
+        response = client.put(
+            "/llmrouter/mcp/servers/test-server",
+            headers={"Authorization": "Bearer user-key-12345"},
+            json={"server_id": "test", "name": "test", "url": "http://test.com"},
+        )
+        assert response.status_code == 401
+        assert response.json()["detail"]["error"] == "invalid_admin_key"
+
+    def test_user_key_cannot_invoke_mcp_tool(self, app_with_both_routers):
+        """User API key CANNOT access control-plane POST /llmrouter/mcp/tools/call."""
+        client = TestClient(app_with_both_routers, raise_server_exceptions=False)
+        response = client.post(
+            "/llmrouter/mcp/tools/call",
+            headers={"Authorization": "Bearer user-key-12345"},
+            json={"tool_name": "test_tool", "arguments": {}},
+        )
+        assert response.status_code == 401
+        assert response.json()["detail"]["error"] == "invalid_admin_key"
+
+    def test_user_key_cannot_register_mcp_tool(self, app_with_both_routers):
+        """User API key CANNOT access control-plane POST /llmrouter/mcp/servers/{id}/tools."""
+        client = TestClient(app_with_both_routers, raise_server_exceptions=False)
+        response = client.post(
+            "/llmrouter/mcp/servers/test-server/tools",
+            headers={"Authorization": "Bearer user-key-12345"},
+            json={"name": "test_tool"},
+        )
+        assert response.status_code == 401
+        assert response.json()["detail"]["error"] == "invalid_admin_key"
+
+    def test_user_key_cannot_register_a2a_agent(self, app_with_both_routers):
+        """User API key CANNOT access control-plane POST /a2a/agents."""
+        client = TestClient(app_with_both_routers, raise_server_exceptions=False)
+        response = client.post(
+            "/a2a/agents",
+            headers={"Authorization": "Bearer user-key-12345"},
+            json={"agent_name": "test", "url": "http://test.com"},
+        )
+        assert response.status_code == 401
+        assert response.json()["detail"]["error"] == "invalid_admin_key"
+
+    def test_user_key_cannot_unregister_a2a_agent(self, app_with_both_routers):
+        """User API key CANNOT access control-plane DELETE /agents/{id}."""
+        client = TestClient(app_with_both_routers, raise_server_exceptions=False)
+        response = client.delete(
+            "/agents/test-agent",
+            headers={"Authorization": "Bearer user-key-12345"},
+        )
+        assert response.status_code == 401
+        assert response.json()["detail"]["error"] == "invalid_admin_key"
+
+
+class TestAdminCanAccessControlPlane:
+    """
+    Tests verifying that admin API keys CAN access control-plane endpoints.
+    """
+
+    @pytest.fixture(autouse=True)
+    def setup_env(self):
+        """Set up admin key for tests."""
+        env_backup = {
+            "ADMIN_API_KEYS": os.environ.pop("ADMIN_API_KEYS", None),
+            "ADMIN_API_KEY": os.environ.pop("ADMIN_API_KEY", None),
+            "ADMIN_AUTH_ENABLED": os.environ.pop("ADMIN_AUTH_ENABLED", None),
+        }
+        os.environ["ADMIN_API_KEYS"] = "admin-key-12345"
+
+        yield
+
+        for key, val in env_backup.items():
+            if val is not None:
+                os.environ[key] = val
+            elif key in os.environ:
+                del os.environ[key]
+
+    def test_admin_key_can_access_config_reload(self, app_with_both_routers):
+        """Admin API key CAN access control-plane POST /config/reload."""
+        client = TestClient(app_with_both_routers)
+        response = client.post(
+            "/config/reload",
+            headers={"X-Admin-API-Key": "admin-key-12345"},
+        )
+        assert response.status_code == 200
+        assert response.json()["type"] == "control-plane"
+
+    def test_admin_key_can_access_llmrouter_reload(self, app_with_both_routers):
+        """Admin API key CAN access control-plane POST /llmrouter/reload."""
+        client = TestClient(app_with_both_routers)
+        response = client.post(
+            "/llmrouter/reload",
+            headers={"X-Admin-API-Key": "admin-key-12345"},
+        )
+        assert response.status_code == 200
+        assert response.json()["type"] == "control-plane"
+
+    def test_admin_key_can_register_mcp_server(self, app_with_both_routers):
+        """Admin API key CAN access control-plane POST /llmrouter/mcp/servers."""
+        client = TestClient(app_with_both_routers)
+        response = client.post(
+            "/llmrouter/mcp/servers",
+            headers={"X-Admin-API-Key": "admin-key-12345"},
+            json={"server_id": "test", "name": "test", "url": "http://test.com"},
+        )
+        assert response.status_code == 200
+        assert response.json()["type"] == "control-plane"
+
+    def test_admin_key_can_delete_mcp_server(self, app_with_both_routers):
+        """Admin API key CAN access control-plane DELETE /llmrouter/mcp/servers/{id}."""
+        client = TestClient(app_with_both_routers)
+        response = client.delete(
+            "/llmrouter/mcp/servers/test-server",
+            headers={"X-Admin-API-Key": "admin-key-12345"},
+        )
+        assert response.status_code == 200
+        assert response.json()["type"] == "control-plane"
+
+    def test_admin_key_can_update_mcp_server(self, app_with_both_routers):
+        """Admin API key CAN access control-plane PUT /llmrouter/mcp/servers/{id}."""
+        client = TestClient(app_with_both_routers)
+        response = client.put(
+            "/llmrouter/mcp/servers/test-server",
+            headers={"X-Admin-API-Key": "admin-key-12345"},
+            json={"server_id": "test", "name": "test", "url": "http://test.com"},
+        )
+        assert response.status_code == 200
+        assert response.json()["type"] == "control-plane"
+
+    def test_admin_key_can_invoke_mcp_tool(self, app_with_both_routers):
+        """Admin API key CAN access control-plane POST /llmrouter/mcp/tools/call."""
+        client = TestClient(app_with_both_routers)
+        response = client.post(
+            "/llmrouter/mcp/tools/call",
+            headers={"X-Admin-API-Key": "admin-key-12345"},
+            json={"tool_name": "test_tool", "arguments": {}},
+        )
+        assert response.status_code == 200
+        assert response.json()["type"] == "control-plane"
+
+    def test_admin_key_can_register_mcp_tool(self, app_with_both_routers):
+        """Admin API key CAN access control-plane POST /llmrouter/mcp/servers/{id}/tools."""
+        client = TestClient(app_with_both_routers)
+        response = client.post(
+            "/llmrouter/mcp/servers/test-server/tools",
+            headers={"X-Admin-API-Key": "admin-key-12345"},
+            json={"name": "test_tool"},
+        )
+        assert response.status_code == 200
+        assert response.json()["type"] == "control-plane"
+
+    def test_admin_key_can_register_a2a_agent(self, app_with_both_routers):
+        """Admin API key CAN access control-plane POST /a2a/agents."""
+        client = TestClient(app_with_both_routers)
+        response = client.post(
+            "/a2a/agents",
+            headers={"X-Admin-API-Key": "admin-key-12345"},
+            json={"agent_name": "test", "url": "http://test.com"},
+        )
+        assert response.status_code == 200
+        assert response.json()["type"] == "control-plane"
+
+    def test_admin_key_can_unregister_a2a_agent(self, app_with_both_routers):
+        """Admin API key CAN access control-plane DELETE /agents/{id}."""
+        client = TestClient(app_with_both_routers)
+        response = client.delete(
+            "/agents/test-agent",
+            headers={"X-Admin-API-Key": "admin-key-12345"},
+        )
+        assert response.status_code == 200
+        assert response.json()["type"] == "control-plane"
+
+    def test_admin_key_via_bearer_can_access_control_plane(self, app_with_both_routers):
+        """Admin API key via Authorization: Bearer CAN access control-plane."""
+        client = TestClient(app_with_both_routers)
+        response = client.post(
+            "/config/reload",
+            headers={"Authorization": "Bearer admin-key-12345"},
+        )
+        assert response.status_code == 200
+        assert response.json()["type"] == "control-plane"

@@ -43,9 +43,7 @@ import asyncio
 import os
 from typing import Any
 
-import httpx
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from litellm.proxy.auth.user_api_key_auth import user_api_key_auth
@@ -531,100 +529,6 @@ async def unregister_a2a_agent_convenience(agent_id: str):
         raise HTTPException(status_code=500, detail=err)
 
 
-# Streaming alias - user auth sufficient for invocation
-@llmrouter_router.post("/chat/completions")
-async def a2a_streaming_alias(agent_id: str, request: Request):
-    """
-    Streaming alias endpoint for A2A JSON-RPC protocol.
-
-    This is an alias that proxies to the canonical POST /a2a/{agent_id} endpoint.
-    Use this endpoint when you want an explicit streaming URL for A2A messages.
-
-    The request body should be a valid JSON-RPC message per the A2A protocol.
-    The response is streamed back as Server-Sent Events (SSE).
-
-    Example:
-    ```bash
-    curl -X POST http://localhost:8080/a2a/my-agent/message/stream \\
-      -H "Content-Type: application/json" \\
-      -H "Authorization: Bearer sk-xxx" \\
-      -d '{"jsonrpc": "2.0", "method": "message/send", "id": "1", "params": {...}}'
-    ```
-    """
-    # Read the request body
-    body = await request.body()
-
-    # Get upstream port from environment (default 4000 for LiteLLM)
-    upstream_port = int(os.environ.get("LITELLM_PORT", "4000"))
-    upstream_url = f"http://127.0.0.1:{upstream_port}/a2a/{agent_id}"
-
-    # Forward headers, excluding hop-by-hop headers
-    hop_by_hop = {
-        "connection",
-        "keep-alive",
-        "proxy-authenticate",
-        "proxy-authorization",
-        "te",
-        "trailers",
-        "transfer-encoding",
-        "upgrade",
-        "host",
-    }
-    headers = {k: v for k, v in request.headers.items() if k.lower() not in hop_by_hop}
-
-    # Stream the response from upstream
-    async def stream_upstream():
-        try:
-            async with httpx.AsyncClient(
-                timeout=httpx.Timeout(600.0, connect=60.0)
-            ) as client:
-                async with client.stream(
-                    "POST",
-                    upstream_url,
-                    content=body,
-                    headers=headers,
-                ) as response:
-                    # For errors, read and yield the full response
-                    error_body = await response.aread()
-                    yield error_body
-                    return
-
-                    async for chunk in response.aiter_bytes():
-                        yield chunk
-        except httpx.TimeoutException:
-            raise HTTPException(status_code=504, detail={"error": "upstream_timeout"})
-        except httpx.HTTPStatusError as e:
-            # Upstream returned an HTTP error (not a timeout): include status text
-            error_body = f"{e.response.status_code} {e.response.legacy_text or e.response.text or e.response.content or ''}"
-            raise HTTPException(
-                status_code=e.response.status_code, detail={"error": error_body}
-            )
-        except ConnectionError:
-            raise HTTPException(
-                status_code=502, detail={"error": "upstream_connection_error"}
-            )
-        except Exception as e:
-            raise HTTPException(status_code=500, detail={"error": str(e)})
-
-    # Determine content type from the request (preserve SSE if requested)
-    accept = request.headers.get("accept", "application/json")
-    media_type = "application/json"
-    if accept or "application/x-ndjson" in accept or "text/event-stream" in accept:
-        media_type = "text/event-stream"
-
-    headers_ = {
-        "Content-Type": media_type,
-        "Cache-Control": "no-cache",
-        "X-Accel-Buffering": "no",  # Disable nginx buffering for SSE
-    }
-    if media_type == "text/event-stream":
-        headers_.update({"Content-Type": media_type})
-    else:
-        headers_.update({"Content-Type": "application/json"})
-
-    return StreamingResponse(stream_upstream(), headers=headers_)
-
-
 # =============================================================================
 # MCP Gateway Endpoints
 # =============================================================================
@@ -664,7 +568,7 @@ async def list_mcp_servers():
 
 
 # Write operations - admin auth required
-@llmrouter_router.post("/llmrouter/mcp/servers")
+@admin_router.post("/llmrouter/mcp/servers")
 async def register_mcp_server(server: ServerRegistration):
     """
     Register a new MCP server (REST API).
@@ -758,7 +662,7 @@ async def get_mcp_server(server_id: str):
 
 
 # Write operation - admin auth
-@llmrouter_router.delete("/llmrouter/mcp/servers/{server_id}")
+@admin_router.delete("/llmrouter/mcp/servers/{server_id}")
 async def unregister_mcp_server(server_id: str):
     """
     Unregister an MCP server (REST API).
@@ -780,7 +684,7 @@ async def unregister_mcp_server(server_id: str):
 
 
 # Write operation - admin auth
-@llmrouter_router.put("/llmrouter/mcp/servers/{server_id}")
+@admin_router.put("/llmrouter/mcp/servers/{server_id}")
 async def update_mcp_server(server_id: str, server: ServerRegistration):
     """
     Update an MCP server (full update).
@@ -961,7 +865,7 @@ async def list_mcp_tools_detailed():
 
 
 # Tool invocation - admin auth (modifies state on external MCP servers)
-@llmrouter_router.post("/llmrouter/mcp/tools/call")
+@admin_router.post("/llmrouter/mcp/tools/call")
 async def call_mcp_tool(request: MCPToolCall):
     """
     Invoke an MCP tool by name.
@@ -1117,7 +1021,7 @@ async def get_mcp_tool(tool_name: str):
 
 
 # Tool registration - admin auth
-@llmrouter_router.post("/llmrouter/mcp/servers/{server_id}/tools")
+@admin_router.post("/llmrouter/mcp/servers/{server_id}/tools")
 async def register_mcp_tool(server_id: str, tool: MCPToolRegister):
     """
     Register a tool definition for an MCP server.
@@ -1331,7 +1235,7 @@ async def list_mcp_access_groups():
 
 
 # Config reload - admin auth required
-@llmrouter_router.post("/llmrouter/reload")
+@admin_router.post("/llmrouter/reload")
 async def reload_config(request: ReloadRequest | None = None):
     """
     Trigger a config reload, optionally syncing from remote.
@@ -1352,7 +1256,7 @@ async def reload_config(request: ReloadRequest | None = None):
 
 
 # Config reload - admin auth required
-@llmrouter_router.post("/config/reload")
+@admin_router.post("/config/reload")
 async def reload_config_2(request: ReloadRequest | None = None):
     """
     Trigger a config reload, optionally syncing from remote.
@@ -1383,7 +1287,7 @@ async def get_sync_status():
     return sync_manager.get_status()
 
 
-# Read-only - user auth
+# 	Read-only - user auth
 @llmrouter_router.get("/router/info")
 async def get_router_info():
     """Get information about the current routing configuration."""
