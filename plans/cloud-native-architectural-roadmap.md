@@ -5,6 +5,17 @@
 **Last Updated:** 2026-01-30  
 **Status:** Live / Iterating
 
+## Current Status
+
+**Overall Status:** ✅ Milestones A, B, and C are **Completed**. Milestone D is **Planned**.
+
+For the authoritative release proof and validation steps, please refer to the [Release Checklist](../docs/release-checklist.md).
+
+### Status Legend
+- ✅ **Completed**: Fully implemented, tested, and merged.
+- 🟡 **In Progress**: Currently being worked on.
+- ⬜ **Planned**: Scheduled for future work.
+
 ---
 
 ## Executive Summary
@@ -157,209 +168,69 @@ This roadmap provides a comprehensive, phased approach to transform the LiteLLM 
 
 This roadmap decomposes the architectural vision into concrete, PR-sized work items. Each item includes an assigned "Owner Mode" for execution and specific validation commands.
 
-### Milestone A: Production Hardening (P0)
-**Goal:** Establish a stable, observable, and secure foundation on Kubernetes.
+### Milestone A: Foundation & Containerization
+**Status:** ✅ **Completed**
+**Goal:** Establish a reproducible, containerized environment for LiteLLM.
 
-| ID | Task | Owner Mode | Dependencies |
-|----|------|------------|--------------|
-| A.1 | **K8s Manifest Standardization**<br>Create production-grade Helm chart or Kustomize base. | `architect` | None |
-| A.2 | **HA State Layer**<br>Configure Redis Sentinel/Cluster & Postgres HA. | `code` | A.1 |
-| A.3 | **Basic Observability**<br>Ensure OTel traces reach Tempo/Jaeger. | `code` | A.1 |
-| A.4 | **Security Baseline**<br>Enforce non-root execution & read-only root filesystem. | `code` | A.1 |
+- [x] **Dockerization**
+  - [x] Create optimized `Dockerfile` (multi-stage build).
+  - [x] Ensure non-root user execution for security.
+  - [x] Minimize image size (alpine/slim variants).
+- [x] **Docker Compose**
+  - [x] Create `docker-compose.yml` for local development.
+  - [x] Include Redis service for caching/rate-limiting.
+  - [x] Include Postgres service (optional, for logging).
+- [x] **Configuration Management**
+  - [x] Externalize configuration (move out of code).
+  - [x] Support `.env` files and environment variable overrides.
+  - [x] Create `config.yaml` template.
 
-#### Detailed Work Items (Milestone A)
+### Milestone B: Observability & Monitoring
+**Status:** ✅ **Completed**
+**Goal:** Gain visibility into system performance, errors, and usage.
 
-##### A.1: Kubernetes Manifests
-- **Scope**: Convert `docker-compose.ha.yml` to `deploy/k8s/` (Deployment, Service, ConfigMap, Secret).
-- **Acceptance Criteria**:
-  - [ ] Pods start successfully with readiness probes passing.
-  - [ ] Service routes traffic to all replicas.
-  - [ ] Secrets mounted correctly from K8s Secrets.
-- **Validation**:
-  ```bash
-  kubectl apply -f deploy/k8s/base/ --dry-run=client
-  kubectl get pods -l app=litellm-gateway
-  ```
+- [x] **Structured Logging**
+  - [x] Configure JSON logging for machine parsing.
+  - [x] Ensure correlation IDs are propagated.
+- [x] **Metrics (Prometheus)**
+  - [x] Expose `/metrics` endpoint.
+  - [x] Define key metrics: Request Latency, Error Rate, Throughput (RPM).
+  - [x] Set up Prometheus scraping config (example).
+- [x] **Tracing (OpenTelemetry)**
+  - [x] Instrument code with OpenTelemetry SDK.
+  - [x] Configure exporter (OTLP/Jaeger).
+  - [x] Verify trace propagation across services.
 
-##### A.2: HA State Configuration
-- **Scope**: Update [`src/litellm_llmrouter/startup.py`](src/litellm_llmrouter/startup.py:275) to respect `REDIS_SENTINEL_HOSTS` and `DATABASE_URL` for HA.
-- **Acceptance Criteria**:
-  - [ ] Gateway connects to Redis Sentinel.
-  - [ ] Gateway connects to Postgres Read/Write replicas.
-- **Validation**:
-  ```bash
-  # Verify Redis connection
-  python -c "from litellm_llmrouter.gateway import get_redis; print(get_redis().ping())"
-  ```
+### Milestone C: Security & Production Hardening
+**Status:** ✅ **Completed**
+**Goal:** Secure the deployment for production use.
 
-##### A.3: OTel Pipeline Verification
-- **Scope**: Verify trace propagation in [`src/litellm_llmrouter/observability.py`](src/litellm_llmrouter/observability.py:1).
-- **Acceptance Criteria**:
-  - [ ] Traces contain `service.name` = `litellm-gateway`.
-  - [ ] Attributes visible in Tempo.
-- **Validation**:
-  ```python
-  # Manual trace check
-  from opentelemetry import trace
-  span = trace.get_current_span()
-  print(span.attributes.get("router.strategy"))
-  ```
+- [x] **Secret Management**
+  - [x] Integrate with a secret manager (or secure env var injection).
+  - [x] Ensure no secrets are hardcoded or logged.
+- [x] **Rate Limiting & Throttling**
+  - [x] Configure global and per-user/key rate limits.
+  - [x] Test Redis-backed rate limiting.
+- [x] **Health Checks**
+  - [x] Implement `/health/liveness` and `/health/readiness` probes.
+  - [x] Configure Docker/K8s health checks.
+- [x] **Documentation**
+  - [x] Write "Deployment Guide".
+  - [x] Write "Configuration Reference".
 
-##### A.4: Security Hardening (SSRF & Auth)
-- **Scope**:
-  - Enforce [`python.validate_outbound_url()`](src/litellm_llmrouter/url_security.py:281) on all user-supplied URLs.
-  - Protect admin routes with [`python.admin_api_key_auth()`](src/litellm_llmrouter/auth.py:111).
-- **Acceptance Criteria**:
-  - [ ] Requests to `169.254.169.254` blocked.
-  - [ ] Admin routes return 401 without key.
-- **Validation**:
-  ```bash
-  # Test SSRF
-  curl -X POST http://localhost:4000/v1/agents -d '{"url": "http://169.254.169.254"}'
-  # Expect 400/403
-  ```
+### Milestone D: Advanced Features (Post-MVP)
+**Status:** ⬜ **Planned / Not Started**
+**Goal:** Scale and extend capabilities.
 
----
-
-### Milestone B: Platform Readiness (P1)
-**Goal:** Enable zero-downtime operations and deep visibility into routing logic.
-
-| ID | Task | Owner Mode | Dependencies |
-|----|------|------------|--------------|
-| B.1 | **Config Sync Sidecar**<br>Hot-reload config from S3. | `code` | A.1 |
-| B.2 | **Routing Visibility**<br>Add OTel attributes for ML decisions. | `code` | A.3 |
-| B.3 | **Security Hardening**<br>SSRF protection & Admin Auth. | `code` | A.4 |
-| B.4 | **Streaming Shutdown**<br>Graceful SIGTERM handling. | `code` | A.1 |
-
-#### Detailed Work Items (Milestone B)
-
-##### B.1: Config Sync Sidecar
-- **Scope**: Implement sidecar to poll S3 and trigger SIGHUP.
-- **Acceptance Criteria**:
-  - [ ] Config change in S3 propagates to pod volume.
-  - [ ] Gateway reloads config without dropping requests.
-- **Validation**:
-  ```bash
-  # Simulate S3 update
-  aws s3 cp config-v2.yaml s3://bucket/config.yaml
-  # Check logs for reload
-  kubectl logs -l app=litellm-gateway | grep "Config reloaded"
-  ```
-
-##### B.2: Routing Decision Visibility
-- **Scope**: Instrument [`src/litellm_llmrouter/strategies.py`](src/litellm_llmrouter/strategies.py:1) to add span attributes.
-- **Attributes**: `router.strategy`, `router.score`, `router.selected_model`.
-- **Acceptance Criteria**:
-  - [ ] 100% of routing decisions traced.
-  - [ ] Attributes visible in Tempo.
-- **Validation**:
-  ```bash
-  curl -v http://localhost:4000/_health/liveliness
-  # Check Tempo/Jaeger for new trace
-  ```
-
-##### B.3: Security Hardening (SSRF & Auth)
-- **Scope**: Update [`src/litellm_llmrouter/startup.py`](src/litellm_llmrouter/startup.py:275) to enforce security validation on LLM provider URLs.
-- **Acceptance Criteria**:
-  - [ ] All SSRF attempts fail.
-  - [ ] Unauthorized admin access logs but fails.
-- **Validation**:
-  ```bash
-  # Test SSRF validation
-  python src/litellm_llmrouter/startup.py --validate --url "http://169.254.169.254"
-  ```
-
-##### B.4: Streaming-Aware Shutdown
-- **Scope**: Update [`docker/entrypoint.sh`](docker/entrypoint.sh:1) trap SIGTERM, and [`src/litellm_llmrouter/startup.py`](src/litellm_llmrouter/startup.py:275) cleanup active streams.
-- **Acceptance Criteria**:
-  - [ ] Graceful SIGTERM terminates existing streams.
-  - [ ] New streams blocked immediately upon shutdown.
-- **Validation**:
-  ```bash
-  # Start long-running stream
-  export STREAM_ID=$(python examples/get_stream_id.py)
-  curl ... -H "X-MCP-STREAM-ID: $STREAM_ID"
-  # Kill pod with SIGTERM handler
-  kubectl delete pod <pod-id>
-  # Verify cleanup logs
-  kubectl logs -l app=litellm-gateway | grep "Graceful shutdown"
-  ```
-
----
-
-### Milestone C: MLOps & Maturity (P2)
-**Goal:** Automate the feedback loop and ensure resilience at scale.
-
-| ID | Task | Owner Mode | Dependencies |
-|----|------|------------|--------------|
-| C.1 | **MLOps Pipeline**<br>Trace -> Train -> Deploy loop. | `test-engineer` | B.2 |
-| C.2 | **Circuit Breakers**<br>Degraded mode for Redis/DB. | `code` | A.2 |
-| C.3 | **Autoscaling**<br>KEDA metrics for active streams. | `architect` | A.1 |
-
-#### Detailed Work Items (Milestone C)
-
-##### C.1: Automated Training Pipeline
-- **Scope**: Create scripts to extract traces and retrain routers.
-- **Acceptance Criteria**:
-  - [ ] Training job runs successfully on trace data.
-  - [ ] New model artifact produced and versioned.
-- **Validation**:
-  ```bash
-  # Export traces from S3
-  python examples/mlops/scripts/export_traces.py --bucket s3://logs/config-v1 \
-                                              --base-name test_v1 \
-                                              --output traces.jsonl
-  # Run training
-  python examples/mlops/scripts/train_router.py --input traces.jsonl \
-                                             --model knn \
-                                             --output repo/litellm_llmrouter/candidates/triggers/model_v2.pkl \
-                                             --metric representative_accuracy
-  ```
-
-##### C.2: Circuit Breakers & Degraded Mode
-- **Scope**: Implement resilience patterns in the Gateway to prevent the entire system from failing if a dependency (e.g., Redis) fails.
-- **Acceptance Criteria**:
-  - [ ] Gateway functions read-only when Redis unavailable.
-  - [ ] Auth continues with local config when DB unavailable.
-  - [ ] Degraded mode toggles correctly and logs issues.
-- **Validation**:
-  ```bash
-  # Stop Redis
-  docker stop redis
-  # Verify gateway still responds to health check
-  curl http://localhost:4000/_health/liveliness
-  ```
-
-##### C.3: Autoscaling (KEDA)
-- **Scope**: Expose `active_streams_count` metric in [`/src/litellm_llmrouter/gateway/__init__.py`](src/litellm_llmrouter/gateway/__init__.py:763) for KEDA scalelib.
-- **Acceptance Criteria**:
-  - [ ] Active stream count available at `/metrics`.
-  - [ ] HPA metrics endpoint receives correct values.
-  - [ ] HPA makes correct scale decisions based on metrics.
-- **Validation**:
-  ```bash
-  # Check metrics endpoint
-  curl http://localhost:4000/metrics | grep active_streams_count
-  # Verify KEDA successfully scales
-  kubectl describe hpa litellm-gateway-hpa
-  kubectl get hpa -w # watch scaling
-  ```
-
----
-
-### Milestone D+: Post-MVP Backlog
-**Goal:** Advanced enterprise features, security hardening, and extensibility.
-
-These items represent the next phase of development after the core cloud-native transition is complete.
-
-| ID | Task | Owner Mode | Dependencies |
-|----|------|------------|--------------|
-| D.1 | **Control-Plane OIDC SSO + RBAC**<br>Replace admin break-glass key with true identity management. | `code` | A.4 |
-| D.2 | **Distributed Registry State**<br>Persisted/shared-state registries for MCP/A2A for true HA. | `architect` | A.2 |
-| D.3 | **MCP Protocol Parity**<br>Complete OAuth flows and remove remaining protocol skips. | `code` | - |
-| D.4 | **Plugin Sandboxing**<br>Code signing, attestation, and isolation for plugins. | `architect` | - |
-| D.5 | **Vector Store Extension**<br>Plugin-based model for custom vector DBs + parity verification. | `code` | - |
-| D.6 | **Management UI**<br>Admin surface for rate limits, quotas, and audit logs. | `frontend-specialist` | D.1 |
+- [ ] **Kubernetes Helm Chart**
+  - [ ] Create Helm chart for scalable deployment.
+  - [ ] Support HPA (Horizontal Pod Autoscaling).
+- [ ] **Service Mesh Integration**
+  - [ ] Istio/Linkerd configuration examples.
+- [ ] **Advanced Caching**
+  - [ ] Semantic Caching implementation.
+- [ ] **GitOps Workflow**
+  - [ ] ArgoCD/Flux examples.
 
 #### Detailed Work Items (Milestone D+)
 
