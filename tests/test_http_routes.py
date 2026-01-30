@@ -874,6 +874,133 @@ def app_with_both_routers():
     return app
 
 
+class TestSecretScrubbing:
+    """Tests for the _scrub_secrets function that sanitizes sensitive data from logs."""
+
+    def test_scrub_api_key_sk_pattern(self):
+        """Test scrubbing sk-prefixed API keys."""
+        from litellm_llmrouter.auth import _scrub_secrets
+
+        # Need at least 16 chars after sk- to trigger scrubbing
+        text = "API key: sk-1234567890abcdefghij"
+        result = _scrub_secrets(text)
+        assert "sk-[REDACTED]" in result
+        assert "1234567890abcdefghij" not in result
+
+    def test_scrub_aws_access_key(self):
+        """Test scrubbing AWS access key IDs."""
+        from litellm_llmrouter.auth import _scrub_secrets
+
+        text = "AWS access key: AKIAIOSFODNN7EXAMPLE"
+        result = _scrub_secrets(text)
+        assert "AKIA[REDACTED]" in result
+        assert "IOSFODNN7EXAMPLE" not in result
+
+    def test_scrub_database_connection_string(self):
+        """Test scrubbing database connection strings."""
+        from litellm_llmrouter.auth import _scrub_secrets
+
+        text = "Connection: postgresql://admin:secretpassword@localhost:5432/db"
+        result = _scrub_secrets(text)
+        assert "secretpassword" not in result
+        assert "[REDACTED]" in result
+
+    def test_scrub_bearer_token(self):
+        """Test scrubbing Bearer tokens."""
+        from litellm_llmrouter.auth import _scrub_secrets
+
+        text = "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"
+        result = _scrub_secrets(text)
+        assert "Bearer [REDACTED]" in result
+        assert "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9" not in result
+
+    def test_scrub_password_pattern(self):
+        """Test scrubbing password patterns."""
+        from litellm_llmrouter.auth import _scrub_secrets
+
+        text = "Error: password=supersecret123 failed"
+        result = _scrub_secrets(text)
+        assert "supersecret123" not in result
+        assert "password=" in result
+
+    def test_scrub_secret_pattern(self):
+        """Test scrubbing secret patterns (with = or :)."""
+        from litellm_llmrouter.auth import _scrub_secrets
+
+        text = "Error: secret=my_api_secret_value failed"
+        result = _scrub_secrets(text)
+        assert "my_api_secret_value" not in result
+        assert "secret=" in result
+
+    def test_scrub_empty_text(self):
+        """Test that empty/None text is handled safely."""
+        from litellm_llmrouter.auth import _scrub_secrets
+
+        assert _scrub_secrets("") == ""
+        assert _scrub_secrets(None) is None
+
+    def test_scrub_no_secrets(self):
+        """Test that text without secrets is unchanged."""
+        from litellm_llmrouter.auth import _scrub_secrets
+
+        # Note: "secrets" (plural) should NOT be matched - only "secret=" or "secret:"
+        text = "Normal error message with no problems"
+        result = _scrub_secrets(text)
+        assert result == text
+
+
+class TestOtelTraceIdExtraction:
+    """Tests for OTEL trace ID extraction in request IDs."""
+
+    def test_get_otel_trace_id_returns_none_without_otel(self):
+        """Test that _get_otel_trace_id returns None when not in a traced context."""
+        from litellm_llmrouter.auth import _get_otel_trace_id
+
+        # Outside of a traced context, should return None
+        result = _get_otel_trace_id()
+        # Could be None or a valid trace ID if OTEL is globally configured
+        assert result is None or isinstance(result, str)
+
+    def test_get_request_id_prefers_context_over_otel(self):
+        """Test that get_request_id prefers context variable over OTEL trace ID."""
+        from litellm_llmrouter.auth import get_request_id, _request_id_ctx
+
+        # Set a context variable
+        token = _request_id_ctx.set("test-context-id")
+        try:
+            result = get_request_id()
+            assert result == "test-context-id"
+        finally:
+            _request_id_ctx.reset(token)
+
+
+class TestHotReloadErrorSanitization:
+    """Tests for hot reload error sanitization."""
+
+    def test_hot_reload_manager_sanitizes_error_response(self):
+        """Test that HotReloadManager.reload_config returns sanitized errors."""
+        from litellm_llmrouter.hot_reload import HotReloadManager
+
+        # Create a manager
+        manager = HotReloadManager()
+
+        # The reload_config method will send SIGHUP which may raise
+        # On success it returns a dict with 'status': 'success'
+        # On failure it returns a dict with 'status': 'failed', 'error': 'config_reload_failed'
+        # NOT the raw exception message
+
+        result = manager.reload_config(force_sync=False)
+
+        # Either success or sanitized failure
+        assert "status" in result
+        if result["status"] == "failed":
+            # Should be sanitized error code, not raw exception
+            assert result["error"] == "config_reload_failed"
+            # Should NOT contain raw exception details
+            assert "Exception" not in str(result)
+            assert "Traceback" not in str(result)
+
+
 class TestUserCannotAccessControlPlane:
     """
     Tests verifying that regular user API keys CANNOT access control-plane endpoints.

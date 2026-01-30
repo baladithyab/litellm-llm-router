@@ -112,8 +112,12 @@ class HotReloadManager:
                 "synced_from_remote": force_sync,
             }
         except Exception as e:
-            verbose_proxy_logger.error(f"Failed to reload config: {e}")
-            return {"status": "failed", "error": str(e)}
+            # Log full error server-side but return sanitized response
+            verbose_proxy_logger.error(
+                f"Failed to reload config: {type(e).__name__}: {e}",
+                exc_info=True,
+            )
+            return {"status": "failed", "error": "config_reload_failed"}
 
     def get_config_sync_status(self) -> dict[str, Any]:
         """Get the current config sync status."""

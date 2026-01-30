@@ -6,6 +6,7 @@ This module provides:
 1. Admin API key authentication for control-plane operations (MCP, A2A, hot-reload)
 2. Request correlation ID middleware for tracing and error responses
 3. Sanitized error responses that don't leak internal exception details
+4. Secret scrubbing for logged error messages
 
 Usage:
     from litellm_llmrouter.auth import admin_api_key_auth, get_request_id
@@ -27,6 +28,7 @@ Configuration:
 
 import logging
 import os
+import re
 import uuid
 from contextvars import ContextVar
 from typing import Optional
@@ -45,15 +47,89 @@ REQUEST_ID_HEADER = "X-Request-ID"
 ADMIN_API_KEY_HEADER = "X-Admin-API-Key"
 AUTHORIZATION_HEADER = "Authorization"
 
+# Patterns for secret scrubbing in error logs
+# These patterns match common secret formats to prevent them from being logged
+SECRET_PATTERNS = [
+    # API keys (various formats)
+    re.compile(r"(sk[-_])[a-zA-Z0-9]{16,}", re.IGNORECASE),
+    re.compile(r"(api[-_]?key[=:])\s*[a-zA-Z0-9\-_]{10,}", re.IGNORECASE),
+    # AWS keys
+    re.compile(r"(AKIA)[A-Z0-9]{16}"),
+    re.compile(r"(aws[-_]?secret)[=:]?\s*[a-zA-Z0-9/+]{40}", re.IGNORECASE),
+    # Database connection strings
+    re.compile(r"(postgres(?:ql)?|mysql|mongodb)://[^@]+:[^@]+@", re.IGNORECASE),
+    # Bearer tokens in headers
+    re.compile(r"(Bearer\s+)[a-zA-Z0-9\-_\.]{10,}", re.IGNORECASE),
+    # Generic password patterns - require = or : followed by the value
+    re.compile(r"(password[=:])\s*[^\s,;\"']+", re.IGNORECASE),
+    # Secret patterns - require = or : followed by the value (not just the word 'secret')
+    re.compile(r"(secret[=:])\s*[^\s,;\"']+", re.IGNORECASE),
+]
+
+
+def _scrub_secrets(text: str) -> str:
+    """
+    Scrub obvious secret patterns from log text.
+
+    Args:
+        text: The text to scrub
+
+    Returns:
+        Text with secrets replaced by [REDACTED]
+    """
+    if not text:
+        return text
+
+    scrubbed = text
+    for pattern in SECRET_PATTERNS:
+        scrubbed = pattern.sub(r"\1[REDACTED]", scrubbed)
+    return scrubbed
+
+
+def _get_otel_trace_id() -> Optional[str]:
+    """
+    Extract the current OTEL trace ID if available.
+
+    Returns:
+        Hex string of trace ID, or None if not in a traced context
+    """
+    try:
+        from opentelemetry import trace
+
+        span = trace.get_current_span()
+        if span and span.is_recording():
+            ctx = span.get_span_context()
+            if ctx and ctx.is_valid:
+                # Return trace_id in hex format (32 chars)
+                return format(ctx.trace_id, "032x")
+    except ImportError:
+        # OpenTelemetry not installed
+        pass
+    except Exception:
+        # Any other error - fail silently
+        pass
+    return None
+
 
 def get_request_id() -> Optional[str]:
     """
     Get the current request's correlation ID.
 
+    Priority order:
+    1. Context variable (set by middleware)
+    2. OTEL trace ID (if available)
+    3. None
+
     Returns:
         The request ID from the current context, or None if not in a request context.
     """
-    return _request_id_ctx.get()
+    # First try context variable (most reliable, set by middleware)
+    ctx_id = _request_id_ctx.get()
+    if ctx_id:
+        return ctx_id
+
+    # Fallback to OTEL trace ID if available
+    return _get_otel_trace_id()
 
 
 def _load_admin_api_keys() -> set[str]:
@@ -213,11 +289,15 @@ def sanitize_error_response(
     Returns:
         dict suitable for JSON response with 'error', 'message', and 'request_id'
     """
-    req_id = request_id or get_request_id() or "unknown"
+    # Get request ID with OTEL trace ID fallback
+    req_id = request_id or get_request_id() or str(uuid.uuid4())
+
+    # Scrub secrets from the error message before logging
+    error_msg = _scrub_secrets(str(error))
 
     # Log the full error server-side with request ID for debugging
     logger.error(
-        f"Request error: {type(error).__name__}: {str(error)}",
+        f"Request error (request_id={req_id}): {type(error).__name__}: {error_msg}",
         extra={"request_id": req_id, "error_type": type(error).__name__},
         exc_info=True,
     )
@@ -235,7 +315,7 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
 
     - Reads X-Request-ID from incoming request headers (for passthrough)
     - Generates a UUID if not provided
-    - Sets the request ID in context for use throughout the request lifecycle
+    - Sets the request ID in context for access throughout the request lifecycle
     - Adds X-Request-ID to response headers
     """
 
