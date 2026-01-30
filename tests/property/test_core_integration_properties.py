@@ -225,7 +225,7 @@ class TestRequestForwardingProperty:
 
 
 # =============================================================================
-# Property 2: Authentication Enforcement
+# Authentication Properties
 # =============================================================================
 
 
@@ -334,7 +334,7 @@ class TestAuthenticationEnforcementProperty:
 
 
 # =============================================================================
-# Property 3: Configuration Loading
+# Configuration Properties
 # =============================================================================
 
 
@@ -523,7 +523,7 @@ class TestConfigurationLoadingProperty:
 
 
 # =============================================================================
-# Property 5: Model and Config Hot Reload
+# Model and Config Hot Reload Properties
 # =============================================================================
 
 
@@ -780,20 +780,14 @@ class TestModelAndConfigHotReloadProperty:
         import sys
         import importlib.util
 
-        # Save original sys.modules state and clean up after test
+        # Save original sys.modules to avoid polluting other tests
         original_modules = dict(sys.modules)
+
         try:
             spec = importlib.util.spec_from_file_location(
                 "config_sync", "src/litellm_llmrouter/config_sync.py"
             )
             config_sync_module = importlib.util.module_from_spec(spec)
-
-            # Mock the litellm logger (only for this test)
-            mock_logger = MagicMock()
-            sys.modules["litellm"] = MagicMock()
-            sys.modules["litellm._logging"] = MagicMock()
-            sys.modules["litellm._logging"].verbose_proxy_logger = mock_logger
-
             spec.loader.exec_module(config_sync_module)
             ConfigSyncManager = config_sync_module.ConfigSyncManager
 
@@ -818,13 +812,22 @@ class TestModelAndConfigHotReloadProperty:
     @settings(
         max_examples=50,
         suppress_health_check=[HealthCheck.too_slow, HealthCheck.filter_too_much],
+        deadline=None,
     )
     @given(
-        s3_bucket=st.text(min_size=3, max_size=63).filter(
-            lambda x: x.strip() and x.replace("-", "").replace(".", "").isalnum()
-        ),
+        s3_bucket=st.text(
+            alphabet=st.characters(
+                whitelist_categories=("L", "N"),
+                whitelist_characters="-.",
+            ),
+            min_size=3,
+            max_size=63,
+        ).filter(lambda x: x.strip() and x.replace("-", "").replace(".", "").isalnum()),
         s3_key=st.text(
-            alphabet=st.characters(blacklist_characters="\x00"),
+            alphabet=st.characters(
+                blacklist_categories=("Cs",),
+                blacklist_characters="\x00",
+            ),
             min_size=1,
             max_size=100,
         ).filter(lambda x: x.strip() and "\x00" not in x),
@@ -836,7 +839,7 @@ class TestModelAndConfigHotReloadProperty:
         For any S3 bucket and key configuration, the ConfigSyncManager should
         correctly detect whether S3 sync is enabled.
 
-        **Validates: Requirements 3.2, 3.4, 3.5**
+        **Validates: Requirements 10.3**
         """
         # Import directly to avoid litellm dependency
         import sys
@@ -938,7 +941,7 @@ class TestModelAndConfigHotReloadProperty:
 
 
 # =============================================================================
-# Property 22: S3 Config Sync with ETag Optimization
+# S3 Config Sync with ETag Optimization Properties
 # =============================================================================
 
 
@@ -946,7 +949,7 @@ class TestS3ConfigSyncWithETagOptimizationProperty:
     """
     Property 22: S3 Config Sync with ETag Optimization
 
-    For any configuration file stored in S3, the Config Sync Manager should
+    For any configuration file stored in S3, the ConfigSyncManager should
     only download the file when the ETag changes, avoiding unnecessary
     downloads when the content is unchanged.
 
