@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "LiteLLM + LLMRouter Gateway - Production AI Gateway with ML-based routing"
 readme = "README.md"
 license = { text = "MIT" }
-requires-python = ">=3.10"
+requires-python = ">=3.14"
 dependencies = [
     # Core application framework
     "fastapi>=0.109.0",
@@ -80,15 +80,15 @@ max_examples = 100
 
 [tool.black]
 line-length = 88
-target-version = ["py310"]
+target-version = ["py314"]
 
 [tool.ruff]
 line-length = 88
-target-version = "py310"
+target-version = "py314"
 exclude = ["reference/"]
 
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.14"
 warn_return_any = true
 warn_unused_configs = true
 

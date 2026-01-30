@@ -21,7 +21,7 @@
 # - Health checks for orchestrators
 #
 # Build args:
-#   PYTHON_VERSION  - Python version (default: 3.12)
+#   PYTHON_VERSION  - Python version (default: 3.14)
 #   UV_VERSION      - uv package manager version (default: 0.9)
 #   LITELLM_VERSION - LiteLLM version (default: 1.80.15)
 #   LLMROUTER_COMMIT - LLMRouter git commit hash
@@ -31,7 +31,7 @@
 #   Run `uv lock --check` locally to verify lockfile is up-to-date before building.
 # =============================================================================
 
-ARG PYTHON_VERSION=3.12
+ARG PYTHON_VERSION=3.14
 ARG UV_VERSION=0.9
 ARG LITELLM_VERSION=1.81.3
 # LLMRouter pinned to specific commit for reproducibility
@@ -41,8 +41,8 @@ ARG LLMROUTER_COMMIT=7890cd9d36951a3c73fec83619321f3704a7aaa8
 # Base image digests for reproducibility
 # To update: docker pull <image> && docker inspect --format='{{index .RepoDigests 0}}' <image>
 # ==============================================================================
-ARG BUILDER_DIGEST=sha256:d8c02dc966030abc9b0184685a451b593fe5ff339a26cfd6d2fbff2d256c960b
-ARG RUNTIME_DIGEST=sha256:a0cb65a2dada255d392fe0426d04ed50911f0b78b3295de0c3286c1c86148b15
+ARG BUILDER_DIGEST=sha256:d414e96d3cc71a71164ad83402f91c4531a4e451505e2d481579b69dfe0a3986
+ARG RUNTIME_DIGEST=sha256:f37be263fb880ce4ed918e487d84576462fb4fafa934dbd08d216ab4cf058808
 
 # ==============================================================================
 # Stage 1: Builder - Clone repos and build wheels with uv
@@ -122,14 +122,12 @@ COPY src/ /app/src/
 # --frozen: Fail if lockfile is out of sync with pyproject.toml (ensures reproducibility)
 # Order: wheels → uv sync with all production extras
 RUN --mount=type=cache,target=/root/.cache/uv \
-    # Install LLMRouter wheel first (not in lockfile, built from source)
+    # Install LLMRouter wheel first (not in lockfile, built from source at pinned commit)
     uv pip install --system /wheels/*.whl || true \
     # Install project dependencies from lockfile with production extras
     # --frozen ensures builds fail if lockfile is out of date
+    # All OTEL packages are included via the 'otel' extra in the lockfile
     && cd /app && uv sync --frozen --no-dev --extra prod --extra db --extra otel --extra cloud --extra callbacks --extra knn \
-    # Install OpenTelemetry instrumentation packages (may not be in all lockfiles)
-    && uv pip install --system \
-    opentelemetry-instrumentation-requests \
     # Cleanup wheels and temp files
     && rm -rf /wheels
 
@@ -143,10 +141,10 @@ RUN SCHEMA_PATH=$(python -c "import litellm; import os; print(os.path.join(os.pa
     fi && \
     # Fix permissions on LiteLLM directories that need write access at runtime
     # Using least-privilege: litellm user owns directories with 755 (rwxr-xr-x)
-    chown -R litellm:litellm /usr/local/lib/python3.12/site-packages/prisma/ 2>/dev/null || true && \
-    chmod -R 755 /usr/local/lib/python3.12/site-packages/prisma/ 2>/dev/null || true && \
-    chown -R litellm:litellm /usr/local/lib/python3.12/site-packages/litellm/proxy/_experimental/out/ 2>/dev/null || true && \
-    chmod -R 755 /usr/local/lib/python3.12/site-packages/litellm/proxy/_experimental/out/ 2>/dev/null || true
+    chown -R litellm:litellm /usr/local/lib/python3.14/site-packages/prisma/ 2>/dev/null || true && \
+    chmod -R 755 /usr/local/lib/python3.14/site-packages/prisma/ 2>/dev/null || true && \
+    chown -R litellm:litellm /usr/local/lib/python3.14/site-packages/litellm/proxy/_experimental/out/ 2>/dev/null || true && \
+    chmod -R 755 /usr/local/lib/python3.14/site-packages/litellm/proxy/_experimental/out/ 2>/dev/null || true
 
 # Copy application files (after dependencies for better layer caching)
 COPY --chown=litellm:litellm src/litellm_llmrouter /app/litellm_llmrouter
