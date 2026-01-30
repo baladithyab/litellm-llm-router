@@ -24,18 +24,18 @@ This document provides a comprehensive architectural plan to eliminate import-ti
 
 The following areas are **already compliant** with no import-time side effects:
 
-1. **[`src/litellm_llmrouter/__init__.py`](src/litellm_llmrouter/__init__.py:1-153)**
+1. **[`src/litellm_llmrouter/__init__.py`](../src/litellm_llmrouter/__init__.py:1-153)**
    - Pure module exports
    - No automatic patch application
    - Documentation clearly states: "Importing this module does NOT apply any monkey patches automatically"
    - **Evidence**: Line 34-36
 
-2. **[`src/litellm_llmrouter/routing_strategy_patch.py`](src/litellm_llmrouter/routing_strategy_patch.py:514-516)**
+2. **[`src/litellm_llmrouter/routing_strategy_patch.py`](../src/litellm_llmrouter/routing_strategy_patch.py:514-516)**
    - Explicit comment: "Patch is NOT applied automatically on import"
    - Global `_patch_applied` flag prevents double-application
    - **Evidence**: Line 514-516
 
-3. **[`src/litellm_llmrouter/gateway/__init__.py`](src/litellm_llmrouter/gateway/__init__.py:1-26)**
+3. **[`src/litellm_llmrouter/gateway/__init__.py`](../src/litellm_llmrouter/gateway/__init__.py:1-26)**
    - Pure factory exports
    - No side effects on import
 
@@ -43,28 +43,28 @@ The following areas are **already compliant** with no import-time side effects:
 
 The following modules use **lazy singleton initialization** which should be replaced with explicit configuration:
 
-1. **Observability Manager** ([`observability.py`](src/litellm_llmrouter/observability.py:493-554))
+1. **Observability Manager** ([`observability.py`](../src/litellm_llmrouter/observability.py:493-554))
    - Global `_observability_manager` singleton
    - Initialized via `init_observability()` call from startup
    - **Issue**: Implicit global state, not worker-safe
    - **Lines**: 493-554
 
-2. **Strategy Registry** ([`strategy_registry.py`](src/litellm_llmrouter/strategy_registry.py:777-810))
+2. **Strategy Registry** ([`strategy_registry.py`](../src/litellm_llmrouter/strategy_registry.py:777-810))
    - Global `_registry_instance` and `_pipeline_instance`
    - Lazy-initialized via `get_routing_registry()`
    - **Issue**: Thread-safe but not multi-process safe
    - **Lines**: 777-810
 
 3. **Gateway Singletons** (Multiple files)
-   - `_a2a_gateway` in [`a2a_gateway.py`](src/litellm_llmrouter/a2a_gateway.py:520-533)
-   - `_mcp_gateway` in [`mcp_gateway.py`](src/litellm_llmrouter/mcp_gateway.py:1043-1056)
-   - `_sync_manager` in [`config_sync.py`](src/litellm_llmrouter/config_sync.py:345-350)
-   - `_hot_reload_manager` in [`hot_reload.py`](src/litellm_llmrouter/hot_reload.py:141-146)
-   - `_plugin_manager` in [`gateway/plugin_manager.py`](src/litellm_llmrouter/gateway/plugin_manager.py:264-276)
+   - `_a2a_gateway` in [`a2a_gateway.py`](../src/litellm_llmrouter/a2a_gateway.py:520-533)
+   - `_mcp_gateway` in [`mcp_gateway.py`](../src/litellm_llmrouter/mcp_gateway.py:1043-1056)
+   - `_sync_manager` in [`config_sync.py`](../src/litellm_llmrouter/config_sync.py:345-350)
+   - `_hot_reload_manager` in [`hot_reload.py`](../src/litellm_llmrouter/hot_reload.py:141-146)
+   - `_plugin_manager` in [`gateway/plugin_manager.py`](../src/litellm_llmrouter/gateway/plugin_manager.py:264-276)
    - **Issue**: Not initialized with app context, shared across workers
    - **Lines**: Various
 
-4. **Database Repositories** ([`database.py`](src/litellm_llmrouter/database.py))
+4. **Database Repositories** ([`database.py`](../src/litellm_llmrouter/database.py))
    - `_a2a_repository`, `_mcp_repository`, `_a2a_activity_tracker`
    - Lazy-initialized with no dependency injection
    - **Issue**: Database URL read from environment at access time

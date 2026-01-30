@@ -76,7 +76,7 @@ We propose organizing the documentation into the following sections:
 
 ## Deployment & Operations
 - [Deployment Overview](deployment.md)
-- [Kubernetes (Helm)](deployment/kubernetes.md)
+- [Kubernetes (Helm)](../deploy/charts/routeiq-gateway/README.md)
 - [AWS Deployment](deployment/aws.md)
 - [Air-Gapped / Moat Mode](deployment/air-gapped.md)
 - [Security Guide](security.md)

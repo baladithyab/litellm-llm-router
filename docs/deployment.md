@@ -288,7 +288,7 @@ export S3_BUCKET_NAME="my-config-bucket"
 
 For specific cloud provider guides, see:
 
-- [AWS Deployment Guide](architecture/aws-deployment.md)
+- [AWS Deployment Guide](deployment/aws.md)
 
 ## Observability Configuration
 

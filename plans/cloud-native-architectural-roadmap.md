@@ -161,6 +161,7 @@ This roadmap provides a comprehensive, phased approach to transform the LiteLLM 
 | **Dashboards** | Grafana / CloudWatch Dashboards | Visualization, alerting, SLO tracking | Backed by Git (IaC) |
 | **Model Registry** | MLflow + S3 / S3 only | Versioned ML artifact storage | S3 versioning + lifecycle policies |
 | **Training Platform** | Kubernetes Jobs / SageMaker Training | ML model training environment | Ephemeral, stateless jobs |
+| **Core Proxy** | Unified API (OpenAI compatible), 100+ providers. | ML-based Routing ([strategies.py](../src/litellm_llmrouter/strategies.py)), A2A/MCP protocol support. |
 
 ---
 
@@ -300,11 +301,11 @@ This roadmap decomposes the architectural vision into concrete, PR-sized work it
 
 ## Appendix: Code References
 
-- **Auth Boundary**: [`src/litellm_llmrouter/auth.py`](src/litellm_llmrouter/auth.py)
-- **SSRF Validation**: [`src/litellm_llmrouter/url_security.py`](src/litellm_llmrouter/url_security.py)
-- **MCP Gateway**: [`src/litellm_llmrouter/mcp_gateway.py`](src/litellm_llmrouter/mcp_gateway.py)
-- **A2A Gateway**: [`src/litellm_llmrouter/a2a_gateway.py`](src/litellm_llmrouter/a2a_gateway.py)
-- **Startup Logic**: [`src/litellm_llmrouter/startup.py`](src/litellm_llmrouter/startup.py:275)
+- **Auth Boundary**: [`src/litellm_llmrouter/auth.py`](../src/litellm_llmrouter/auth.py)
+- **SSRF Validation**: [`src/litellm_llmrouter/url_security.py`](../src/litellm_llmrouter/url_security.py)
+- **MCP Gateway**: [`src/litellm_llmrouter/mcp_gateway.py`](../src/litellm_llmrouter/mcp_gateway.py)
+- **A2A Gateway**: [`src/litellm_llmrouter/a2a_gateway.py`](../src/litellm_llmrouter/a2a_gateway.py)
+- **Startup Logic**: [`src/litellm_llmrouter/startup.py`](../src/litellm_llmrouter/startup.py:275)
 - **Backend Configuration**: `DATABASE_URL`, `LLMFS`, `REDIS_URL`, `LOG_DIR`, `ADMIN_API_KEYS`, `SSRF_PROTECTION_ENABLED`
-- **Backend Estado**: [`src/litellm_llmrouter/backendmanager.py`](src/litellm_llmrouter/backendmanager.py:193), [`src/litellm_llmrouter/backendmanager.py`](src/litellm_llmrouter/backendmanager.py:216), [`src/audit_exporter/exporter.py`](src/audit_exporter/exporter.py:44), [`src/litellm_llmrouter/signatures.py`](src/litellm_llmrouter/signatures.py:176)
-- **C2B and MCP**: [`src/litellm_llmrouter/backendmanager.py`](src/litellm_llmrouter/backendmanager.py:334), [`src/litellm_llmrouter/gateway/__init__.py`](src/litellm_llmrouter/gateway/__init__.py:121), [`src/litellm_llmrouter/plugins.py`](src/litellm_llmrouter/plugins.py:741), [`src/litellm_llmrouter/cli.py`](src/litellm_llmrouter/cli.py:253), [`src/litellm_llmrouter/backendmanager.py`](src/litellm_llmrouter/backendmanager.py:193), [`src/litellm_llmrouter/auth.py`](src/litellm_llmrouter/auth.py), [`src/litellm_llmrouter/url_security.py`](src/litellm_llmrouter/url_security.py), [`src/litellm_llmrouter/custom_proxies.py`](src/litellm_llmrouter/custom_proxies.py), [`src/litellm_llmrouter/mcp_client.py`](src/litellm_llmrouter/mcp_client.py), [`src/audit_exporter/exporter.py`](src/audit_exporter/exporter.py), [`src/litellm_llmrouter/logger/aws_connect.py`](src/litellm_llmrouter/logger/aws_connect.py), [`src/litellm_llmrouter/logger/audit_logger.py`](src/litellm_llmrouter/logger/audit_logger.py)
+- **Backend Estado**: [`src/litellm_llmrouter/backendmanager.py`](../src/litellm_llmrouter/backendmanager.py:193), [`src/litellm_llmrouter/backendmanager.py`](../src/litellm_llmrouter/backendmanager.py:216), [`src/audit_exporter/exporter.py`](../src/audit_exporter/exporter.py:44), [`src/litellm_llmrouter/signatures.py`](../src/litellm_llmrouter/signatures.py:176)
+- **C2B and MCP**: [`src/litellm_llmrouter/backendmanager.py`](../src/litellm_llmrouter/backendmanager.py:334), [`src/litellm_llmrouter/gateway/__init__.py`](../src/litellm_llmrouter/gateway/__init__.py:121), [`src/litellm_llmrouter/plugins.py`](../src/litellm_llmrouter/plugins.py:741), [`src/litellm_llmrouter/cli.py`](../src/litellm_llmrouter/cli.py:253), [`src/litellm_llmrouter/backendmanager.py`](../src/litellm_llmrouter/backendmanager.py:193), [`src/litellm_llmrouter/auth.py`](../src/litellm_llmrouter/auth.py), [`src/litellm_llmrouter/url_security.py`](../src/litellm_llmrouter/url_security.py), [`src/litellm_llmrouter/custom_proxies.py`](../src/litellm_llmrouter/custom_proxies.py), [`src/litellm_llmrouter/mcp_client.py`](../src/litellm_llmrouter/mcp_client.py), [`src/audit_exporter/exporter.py`](../src/audit_exporter/exporter.py), [`src/litellm_llmrouter/logger/aws_connect.py`](../src/litellm_llmrouter/logger/aws_connect.py), [`src/litellm_llmrouter/logger/audit_logger.py`](../src/litellm_llmrouter/logger/audit_logger.py)

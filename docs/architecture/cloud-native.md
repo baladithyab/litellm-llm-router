@@ -13,7 +13,7 @@ We do **not** fork LiteLLM. All enhancements are implemented via:
 
 | Feature Area | Upstream LiteLLM Provides | This Enhancement Layer Adds |
 | :--- | :--- | :--- |
-| **Core Proxy** | Unified API (OpenAI compatible), 100+ providers. | ML-based Routing ([`llmrouter`](architecture/ml-routing-cloud-native.md)), A2A/MCP protocol support. |
+| **Core Proxy** | Unified API (OpenAI compatible), 100+ providers. | ML-based Routing ([`llmrouter`](ml-routing-cloud-native.md)), A2A/MCP protocol support. |
 | **Deployment** | Basic Docker image, Helm chart. | Hot-reload config sync, streaming-aware shutdown, air-gapped "moat-mode" patterns. |
 | **Observability** | Prometheus metrics, OTel traces, logging callbacks. | Multi-replica trace correlation, routing decision visibility, durable audit export. |
 | **Resilience** | Retries, fallbacks, simple rate limiting. | Advanced backpressure, load shedding, degraded mode operation. |
@@ -81,7 +81,7 @@ We do **not** fork LiteLLM. All enhancements are implemented via:
 
 ## Validation
 
-All enhancements must be validated against the [Validation Plan](VALIDATION_PLAN.md):
+All enhancements must be validated against the [Validation Plan](../VALIDATION_PLAN.md):
 -   **Hot Reload**: Verify config updates propagate within `reload_interval` without dropping requests.
 -   **Shutdown**: Verify active streams complete during SIGTERM.
 -   **Observability**: Verify traces contain routing metadata in Jaeger/Tempo.
