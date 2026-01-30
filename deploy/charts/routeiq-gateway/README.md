@@ -36,20 +36,45 @@ helm install routeiq-gateway ./deploy/charts/routeiq-gateway \
   -f production-values.yaml
 ```
 
-## Configuration
+## Configuration Reference
 
 See [`values.yaml`](values.yaml) for the full list of configurable parameters.
 
-### Key Configuration Sections
+### Required Configuration
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `secrets.existingSecret` OR `secrets.create` | API keys must be provided via Secret | `""` / `false` |
+| `config.gateway` | Gateway config YAML (model_list, etc.) | Example config |
+
+### Image Configuration
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
 | `image.repository` | Container image repository | `ghcr.io/baladithyab/litellm-llm-router` |
 | `image.tag` | Container image tag (defaults to Chart appVersion) | `""` |
 | `image.digest` | Container image digest (takes precedence over tag) | `""` |
+| `image.pullPolicy` | Image pull policy | `IfNotPresent` |
+
+### Scaling & Availability
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
 | `replicaCount` | Number of replicas | `2` |
-| `resources.requests` | Resource requests | `512Mi/500m` |
-| `resources.limits` | Resource limits | `2Gi/2000m` |
+| `autoscaling.enabled` | Enable HPA | `false` |
+| `autoscaling.minReplicas` | Minimum replicas for HPA | `2` |
+| `autoscaling.maxReplicas` | Maximum replicas for HPA | `10` |
+| `podDisruptionBudget.enabled` | Enable PDB | `false` |
+| `podDisruptionBudget.minAvailable` | Minimum available pods | `1` |
+
+### Resources
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `resources.requests.memory` | Memory request | `512Mi` |
+| `resources.requests.cpu` | CPU request | `500m` |
+| `resources.limits.memory` | Memory limit | `2Gi` |
+| `resources.limits.cpu` | CPU limit | `2000m` |
 
 ### Health Probes
 
@@ -58,7 +83,8 @@ The chart configures health probes using the gateway's internal health endpoints
 | Probe | Endpoint | Purpose |
 |-------|----------|---------|
 | Liveness | `/_health/live` | Basic health check (no external deps) |
-| Readiness | `/_health/ready` | Full health check (includes DB/Redis) |
+| Readiness | `/_health/ready` | Full health check (includes DB/Redis if configured) |
+| Startup | `/_health/live` | Slow-start support (disabled by default) |
 
 ### Secrets Management
 
@@ -76,6 +102,10 @@ secrets:
 secrets:
   existingSecret: "my-gateway-secrets"
 ```
+
+Required keys in your secret:
+- `LITELLM_MASTER_KEY` - Master API key for admin access
+- Provider API keys as needed: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `AZURE_API_KEY`, etc.
 
 **Option 3: External Secrets Operator (production)**
 ```yaml
@@ -106,6 +136,8 @@ config:
           model: anthropic/claude-3-5-sonnet-20241022
     litellm_settings:
       drop_params: true
+    general_settings:
+      master_key: env/LITELLM_MASTER_KEY
 ```
 
 ### Optional Features
@@ -142,6 +174,78 @@ networkPolicy:
     allowHttpsExternal: true
 ```
 
+## Security Defaults
+
+This chart implements security best practices by default:
+
+### Pod Security
+
+| Setting | Value | Description |
+|---------|-------|-------------|
+| `runAsNonRoot` | `true` | Prevents container from running as root |
+| `runAsUser` | `1000` | Runs as non-privileged user |
+| `readOnlyRootFilesystem` | `true` | Immutable container filesystem |
+| `allowPrivilegeEscalation` | `false` | Prevents privilege escalation |
+| `capabilities.drop` | `["ALL"]` | Drops all Linux capabilities |
+| `seccompProfile.type` | `RuntimeDefault` | Uses default seccomp profile |
+
+### Service Account
+
+| Setting | Value | Description |
+|---------|-------|-------------|
+| `serviceAccount.create` | `true` | Creates dedicated service account |
+| `serviceAccount.automountServiceAccountToken` | `false` | Disables K8s API token mount |
+
+To enable Kubernetes API access (e.g., for IRSA/Workload Identity), set:
+```yaml
+serviceAccount:
+  automountServiceAccountToken: true
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/routeiq-gateway
+```
+
+### Network Policy
+
+NetworkPolicy is **opt-in** (`enabled: false` by default).
+
+When enabled, the default configuration:
+- **Ingress**: Allows traffic from all sources (configure `ingress.fromNamespaceSelector`/`fromPodSelector` to restrict)
+- **Egress**: Allows DNS + HTTPS/HTTP to external IPs only (blocks private IP ranges)
+
+For strict production lockdown:
+```yaml
+networkPolicy:
+  enabled: true
+  ingress:
+    fromNamespaceSelector:
+      kubernetes.io/metadata.name: my-app-namespace
+    fromPodSelector:
+      app.kubernetes.io/name: my-app
+  egress:
+    allowDns: true
+    allowHttpsExternal: true
+    to:
+      - namespaceSelector:
+          matchLabels:
+            name: database
+        podSelector:
+          matchLabels:
+            app: postgres
+        ports:
+          - port: 5432
+```
+
+### SSRF Protection
+
+The gateway has built-in SSRF protection enabled by default:
+```yaml
+gateway:
+  ssrf:
+    allowPrivateIps: false  # Blocks requests to private IPs
+    allowlistHosts: ""      # Comma-separated allowed hosts
+    allowlistCidrs: ""      # Comma-separated allowed CIDRs
+```
+
 ## Upgrading
 
 ```bash
@@ -159,22 +263,12 @@ helm uninstall routeiq-gateway
 Validate the chart templates without installing:
 
 ```bash
+# Lint the chart
+helm lint ./deploy/charts/routeiq-gateway
+
+# Render templates locally
 helm template routeiq-gateway ./deploy/charts/routeiq-gateway --debug
 ```
-
-Lint the chart:
-
-```bash
-helm lint ./deploy/charts/routeiq-gateway
-```
-
-## Security Considerations
-
-- Always use `secrets.existingSecret` or `externalSecrets` in production
-- Enable `networkPolicy` to restrict traffic
-- The chart sets `readOnlyRootFilesystem: true` by default
-- Runs as non-root user (UID 1000)
-- SSRF protection is enabled by default (`gateway.ssrf.allowPrivateIps: false`)
 
 ## Troubleshooting
 
@@ -198,6 +292,19 @@ helm lint ./deploy/charts/routeiq-gateway
    kubectl port-forward svc/routeiq-gateway 4000:80
    curl http://localhost:4000/_health/live
    curl http://localhost:4000/_health/ready
+   ```
+
+### NetworkPolicy blocking traffic
+
+1. Verify NetworkPolicy is applied:
+   ```bash
+   kubectl get networkpolicy -n <namespace>
+   kubectl describe networkpolicy <name> -n <namespace>
+   ```
+
+2. Check pod labels match selectors:
+   ```bash
+   kubectl get pods -n <namespace> --show-labels
    ```
 
 ## Contributing

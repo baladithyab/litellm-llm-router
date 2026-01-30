@@ -93,8 +93,11 @@ spec:
             {{- toYaml . | nindent 12 }}
             {{- end }}
           envFrom:
+            {{- if or .Values.secrets.create .Values.secrets.existingSecret }}
             - secretRef:
                 name: {{ include "routeiq-gateway.secretName" . }}
+                optional: true
+            {{- end }}
             {{- with .Values.extraEnvFrom }}
             {{- toYaml . | nindent 12 }}
             {{- end }}

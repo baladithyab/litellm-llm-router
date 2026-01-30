@@ -19,6 +19,14 @@ global:
   # - name: regcred
 
 # -----------------------------------------------------------------------------
+# Name overrides
+# -----------------------------------------------------------------------------
+# Override the chart name
+nameOverride: ""
+# Override the full name (release-name + chart-name)
+fullnameOverride: ""
+
+# -----------------------------------------------------------------------------
 # Image configuration
 # -----------------------------------------------------------------------------
 image:
@@ -86,7 +94,6 @@ ingress:
   #  - secretName: routeiq-tls
   #    hosts:
   #      - routeiq.example.com
-
 # -----------------------------------------------------------------------------
 # Resource requests and limits
 # -----------------------------------------------------------------------------
@@ -173,25 +180,36 @@ podSecurityContext:
   runAsUser: 1000
   runAsGroup: 1000
   fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
 
 containerSecurityContext:
+  runAsNonRoot: true
   readOnlyRootFilesystem: true
   allowPrivilegeEscalation: false
   capabilities:
     drop:
       - ALL
+  seccompProfile:
+    type: RuntimeDefault
 
 # -----------------------------------------------------------------------------
 # Service account
 # -----------------------------------------------------------------------------
 serviceAccount:
+  # Create a dedicated service account
   create: true
+  # Name of the service account (defaults to fullname)
   name: ""
+  # Annotations for the service account
   annotations: {}
     # For AWS IRSA:
     # eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/routeiq-gateway
     # For GKE Workload Identity:
     # iam.gke.io/gcp-service-account: routeiq@project.iam.gserviceaccount.com
+  # Disable automounting service account token for security
+  # Enable only if your application requires Kubernetes API access
+  automountServiceAccountToken: false
 
 # -----------------------------------------------------------------------------
 # Gateway configuration (environment variables)
@@ -366,11 +384,24 @@ tmpVolume:
   sizeLimit: 256Mi
 
 # -----------------------------------------------------------------------------
-# Network Policy (optional)
+# Network Policy (optional, opt-in)
 # -----------------------------------------------------------------------------
+# IMPORTANT: NetworkPolicy is DISABLED by default (enabled: false).
+# When enabled without ingress selectors, it defaults to allow-all ingress.
+# For production, configure ingress selectors to restrict traffic sources.
+#
+# Egress defaults to:
+# - DNS resolution (to kube-dns)
+# - HTTPS (443) and HTTP (80) to external IPs (excludes private ranges)
+# This allows LLM API calls while blocking access to internal services.
+#
+# To enforce strict egress (default-deny with explicit allows), set:
+#   egress.allowHttpsExternal: false
+#   egress.to: [...explicit rules...]
 networkPolicy:
   enabled: false
   # Ingress rules - who can access the gateway
+  # When no selectors are specified, allows traffic from all sources
   ingress:
     # Allow from all namespaces with specific labels
     fromNamespaceSelector: {}
@@ -383,11 +414,12 @@ networkPolicy:
 
   # Egress rules - what the gateway can access
   egress:
-    # Allow DNS resolution
+    # Allow DNS resolution (required for most functionality)
     allowDns: true
-    # Allow HTTPS to external services (LLM providers)
+    # Allow HTTPS/HTTP to external services (LLM providers)
+    # This blocks access to private IP ranges (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16)
     allowHttpsExternal: true
-    # Additional egress rules
+    # Additional egress rules for internal services (database, Redis, etc.)
     to: []
       # - namespaceSelector:
       #     matchLabels:
