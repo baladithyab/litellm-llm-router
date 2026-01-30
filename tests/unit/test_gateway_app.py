@@ -96,10 +96,10 @@ class TestPluginLifecycle:
             started = False
             stopped = False
 
-            async def startup(self, app):
+            async def startup(self, app, context=None):
                 TestPlugin.started = True
 
-            async def shutdown(self, app):
+            async def shutdown(self, app, context=None):
                 TestPlugin.stopped = True
 
         # Register plugin

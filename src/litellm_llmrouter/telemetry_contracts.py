@@ -26,7 +26,8 @@ from typing import Any, Dict, List, Optional
 # Contract version - increment on breaking changes
 CONTRACT_MAJOR_VERSION = 1
 CONTRACT_MINOR_VERSION = 1  # Bumped for experiment tracking (additive)
-CONTRACT_VERSION = f"v{CONTRACT_MAJOR_VERSION}.{CONTRACT_MINOR_VERSION}"
+# Use stable version string "v1" - minor versions are additive only
+CONTRACT_VERSION = "v1"
 CONTRACT_NAME = "routeiq.router_decision"
 CONTRACT_FULL_NAME = f"{CONTRACT_NAME}.{CONTRACT_VERSION}"
 
