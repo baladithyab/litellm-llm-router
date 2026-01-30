@@ -7,6 +7,7 @@ Provides OTel tracing for MCP tool calls with:
 - Attributes: server_id, tool_name, transport, success/failure, duration
 - Error recording with exception details
 - Integration with the global OTel tracer
+- Evaluator plugin hooks for post-invocation scoring
 
 Usage:
     from litellm_llmrouter.mcp_tracing import instrument_mcp_gateway
@@ -247,6 +248,8 @@ def instrument_mcp_gateway() -> bool:
     This modifies the global MCPGateway instance to add tracing
     to key operations like tool calls, server registration, and health checks.
 
+    Also integrates evaluator plugin hooks for post-invocation scoring.
+
     Returns:
         True if instrumentation was successful, False otherwise
     """
@@ -283,6 +286,8 @@ def instrument_mcp_gateway() -> bool:
             server_name = server.name if server else "unknown"
             transport = server.transport.value if server else "unknown"
 
+            start_time = time.perf_counter()
+
             with trace_tool_call(
                 tracer, tool_name, server_id, server_name, transport
             ) as span:
@@ -291,6 +296,9 @@ def instrument_mcp_gateway() -> bool:
                     add_invocation_disabled_attribute(span, True)
 
                 result = await original_invoke_tool(tool_name, arguments)
+
+                duration_ms = (time.perf_counter() - start_time) * 1000
+
                 if span and hasattr(span, "set_attribute"):
                     span.set_attribute(ATTR_MCP_SUCCESS, result.success)
                     if result.error:
@@ -298,6 +306,20 @@ def instrument_mcp_gateway() -> bool:
                         # Check for specific error patterns to add categorized attributes
                         if "tool_invocation_disabled" in result.error:
                             add_invocation_disabled_attribute(span, True)
+
+                # Run evaluator hooks (if enabled)
+                await _run_mcp_evaluator_hooks(
+                    tool_name=tool_name,
+                    server_id=server_id,
+                    server_name=server_name,
+                    arguments=arguments,
+                    result=result,
+                    success=result.success,
+                    error=result.error,
+                    duration_ms=duration_ms,
+                    span=span,
+                )
+
                 return result
 
         gateway.invoke_tool = traced_invoke_tool
@@ -383,3 +405,62 @@ def add_invocation_disabled_attribute(span: Any, disabled: bool) -> None:
             span.set_attribute(ATTR_MCP_INVOCATION_DISABLED, bool(disabled))
     except Exception:
         pass
+
+
+async def _run_mcp_evaluator_hooks(
+    tool_name: str,
+    server_id: str,
+    server_name: str,
+    arguments: dict[str, Any],
+    result: Any,
+    success: bool,
+    error: str | None,
+    duration_ms: float,
+    span: Any,
+) -> None:
+    """
+    Run evaluator plugin hooks after MCP tool invocation.
+
+    This is called after each MCP tool call completes. It creates
+    an MCPInvocationContext and runs all registered evaluator plugins.
+
+    Args:
+        tool_name: Name of the tool that was called
+        server_id: ID of the MCP server
+        server_name: Name of the MCP server
+        arguments: Arguments passed to the tool
+        result: Result from the tool invocation
+        success: Whether the invocation succeeded
+        error: Error message if invocation failed
+        duration_ms: Duration of the invocation in milliseconds
+        span: Current OTEL span
+    """
+    try:
+        from litellm_llmrouter.gateway.plugins.evaluator import (
+            MCPInvocationContext,
+            is_evaluator_enabled,
+            run_mcp_evaluators,
+        )
+
+        if not is_evaluator_enabled():
+            return
+
+        context = MCPInvocationContext(
+            tool_name=tool_name,
+            server_id=server_id,
+            server_name=server_name,
+            arguments=arguments,
+            result=result,
+            success=success,
+            error=error,
+            duration_ms=duration_ms,
+            span=span,
+        )
+
+        await run_mcp_evaluators(context)
+
+    except ImportError:
+        # Evaluator module not available - this is fine
+        pass
+    except Exception as e:
+        verbose_proxy_logger.debug(f"MCP tracing: Evaluator hook error: {e}")

@@ -10,6 +10,7 @@ Provides OTel tracing for A2A (Agent-to-Agent) protocol operations with:
 - Safe no-op behavior when tracing is disabled
 - Proper span lifecycle management for streaming (disconnect-safe)
 - FastAPI middleware for instrumenting LiteLLM's built-in /a2a/* routes
+- Evaluator plugin hooks for post-invocation scoring
 
 Usage:
     from litellm_llmrouter.a2a_tracing import (
@@ -447,6 +448,8 @@ def instrument_a2a_gateway() -> bool:
     This modifies the global A2AGateway instance to add tracing
     to key operations like agent invocations and streaming.
 
+    Also integrates evaluator plugin hooks for post-invocation scoring.
+
     Returns:
         True if instrumentation was successful, False otherwise
     """
@@ -488,6 +491,8 @@ def instrument_a2a_gateway() -> bool:
             headers = {"Content-Type": "application/json"}
             inject_trace_headers(headers)
 
+            start_time = time.perf_counter()
+
             with trace_agent_send(
                 tracer,
                 agent_id=agent_id,
@@ -497,13 +502,31 @@ def instrument_a2a_gateway() -> bool:
                 message_id=str(message_id) if message_id else None,
             ) as span:
                 result = await original_invoke_agent(agent_id, request)
+
+                duration_ms = (time.perf_counter() - start_time) * 1000
+                success = result.error is None if result else False
+                error_msg = None
+
                 if span and hasattr(span, "set_attribute"):
-                    span.set_attribute(
-                        ATTR_A2A_SUCCESS, result.error is None if result else False
-                    )
+                    span.set_attribute(ATTR_A2A_SUCCESS, success)
                     if result and result.error:
                         error_msg = str(result.error.get("message", "Unknown error"))
                         span.set_attribute(ATTR_A2A_ERROR, error_msg)
+
+                # Run evaluator hooks (if enabled)
+                await _run_a2a_evaluator_hooks(
+                    agent_id=agent_id,
+                    agent_name=agent_name,
+                    agent_url=agent_url,
+                    method=method,
+                    request=request,
+                    result=result,
+                    success=success,
+                    error=error_msg,
+                    duration_ms=duration_ms,
+                    span=span,
+                )
+
                 return result
 
         gateway.invoke_agent = traced_invoke_agent
@@ -633,3 +656,65 @@ def trace_agent_send(
             span.set_attribute(ATTR_A2A_DURATION_MS, round(duration_ms, 2))
             span.set_attribute(ATTR_A2A_SUCCESS, True)
             span.set_status(Status(StatusCode.OK))
+
+
+async def _run_a2a_evaluator_hooks(
+    agent_id: str,
+    agent_name: str,
+    agent_url: str,
+    method: str,
+    request: Any,
+    result: Any,
+    success: bool,
+    error: str | None,
+    duration_ms: float,
+    span: Any,
+) -> None:
+    """
+    Run evaluator plugin hooks after A2A agent invocation.
+
+    This is called after each A2A agent call completes. It creates
+    an A2AInvocationContext and runs all registered evaluator plugins.
+
+    Args:
+        agent_id: ID of the agent that was called
+        agent_name: Name of the agent
+        agent_url: URL of the agent endpoint
+        method: JSON-RPC method that was called
+        request: Request that was sent to the agent
+        result: Result from the agent invocation
+        success: Whether the invocation succeeded
+        error: Error message if invocation failed
+        duration_ms: Duration of the invocation in milliseconds
+        span: Current OTEL span
+    """
+    try:
+        from litellm_llmrouter.gateway.plugins.evaluator import (
+            A2AInvocationContext,
+            is_evaluator_enabled,
+            run_a2a_evaluators,
+        )
+
+        if not is_evaluator_enabled():
+            return
+
+        context = A2AInvocationContext(
+            agent_id=agent_id,
+            agent_name=agent_name,
+            agent_url=agent_url,
+            method=method,
+            request=request,
+            result=result,
+            success=success,
+            error=error,
+            duration_ms=duration_ms,
+            span=span,
+        )
+
+        await run_a2a_evaluators(context)
+
+    except ImportError:
+        # Evaluator module not available - this is fine
+        pass
+    except Exception as e:
+        verbose_proxy_logger.debug(f"A2A tracing: Evaluator hook error: {e}")

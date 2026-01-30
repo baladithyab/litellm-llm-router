@@ -249,6 +249,187 @@ Plugins are loaded in this order:
 5. **Specify dependencies**: If your plugin needs another, declare it
 6. **Keep priority high**: Use default (1000) unless you need earlier loading
 
+## Evaluator Plugins
+
+Evaluator plugins provide post-execution scoring for MCP tool invocations and A2A agent calls. They emit OTEL metrics for observability.
+
+### Evaluator Plugin Contract
+
+Evaluator plugins extend `EvaluatorPlugin` and implement two methods:
+
+```python
+from litellm_llmrouter.gateway.plugins.evaluator import (
+    EvaluatorPlugin,
+    EvaluationResult,
+    MCPInvocationContext,
+    A2AInvocationContext,
+)
+
+class MyEvaluator(EvaluatorPlugin):
+    async def evaluate_mcp_result(
+        self, context: MCPInvocationContext
+    ) -> EvaluationResult:
+        # Score the MCP tool invocation
+        score = 1.0 if context.success else 0.0
+        return EvaluationResult(
+            score=score,
+            status="success" if context.success else "error",
+            metadata={"tool_name": context.tool_name},
+        )
+
+    async def evaluate_a2a_result(
+        self, context: A2AInvocationContext
+    ) -> EvaluationResult:
+        # Score the A2A agent invocation
+        return EvaluationResult(
+            score=0.9,
+            status="success",
+            metadata={"agent_id": context.agent_id},
+        )
+```
+
+### OTEL Attributes
+
+Evaluator plugins emit the following OTEL span attributes:
+
+| Attribute | Type | Description |
+|-----------|------|-------------|
+| `eval.plugin` | string | Name of the evaluator plugin |
+| `eval.score` | float | Numeric score (0.0-1.0) |
+| `eval.status` | string | Status: success, error, skipped |
+| `eval.duration_ms` | float | Evaluation duration in ms |
+| `eval.error` | string | Error message (if status is error) |
+| `eval.invocation_type` | string | Type: "mcp" or "a2a" |
+
+### Enabling Evaluator Hooks
+
+Evaluator hooks are **disabled by default**. Enable them with:
+
+```bash
+export ROUTEIQ_EVALUATOR_ENABLED=true
+```
+
+### UpskillEvaluatorPlugin (Reference Implementation)
+
+A reference evaluator plugin is provided that demonstrates:
+- Basic success/failure scoring
+- Optional integration with `upskill` CLI
+- SSRF-protected endpoint calls
+- OTEL metric emission
+
+#### Enable the Plugin
+
+```bash
+# Enable the plugin
+export LLMROUTER_PLUGINS=litellm_llmrouter.gateway.plugins.upskill_evaluator.UpskillEvaluatorPlugin
+
+# Enable evaluator hooks
+export ROUTEIQ_EVALUATOR_ENABLED=true
+```
+
+#### Optional Upskill Integration
+
+The plugin can optionally use the `upskill` CLI or service for advanced scoring:
+
+```bash
+# Enable upskill integration
+export ROUTEIQ_UPSKILL_ENABLED=true
+
+# Optional: Specify upskill service endpoint
+export ROUTEIQ_UPSKILL_ENDPOINT=http://upskill-service:8080/evaluate
+
+# Optional: Timeout for upskill calls (default: 5 seconds)
+export ROUTEIQ_UPSKILL_TIMEOUT=10
+```
+
+**Note**: The plugin has no hard dependency on upskill. If upskill is not available, it falls back to basic scoring.
+
+#### How It Works
+
+1. **Basic Mode** (default): Scores 1.0 for success, 0.0 for failure
+2. **Upskill CLI Mode**: Shells out to `upskill` binary if found in PATH
+3. **Upskill Service Mode**: Calls HTTP endpoint (with SSRF protection)
+
+#### Example OTEL Output
+
+When evaluator hooks are enabled, spans will include attributes like:
+
+```
+eval.plugin: upskill-evaluator
+eval.score: 0.95
+eval.status: success
+eval.duration_ms: 12.5
+eval.invocation_type: mcp
+```
+
+### Creating Custom Evaluators
+
+1. Create your evaluator class:
+
+```python
+# mypackage/my_evaluator.py
+from litellm_llmrouter.gateway.plugins.evaluator import (
+    EvaluatorPlugin,
+    EvaluationResult,
+    MCPInvocationContext,
+    A2AInvocationContext,
+    register_evaluator,
+)
+from litellm_llmrouter.gateway.plugin_manager import (
+    PluginMetadata,
+    PluginCapability,
+    PluginContext,
+)
+
+class MyEvaluator(EvaluatorPlugin):
+    @property
+    def metadata(self) -> PluginMetadata:
+        return PluginMetadata(
+            name="my-evaluator",
+            version="1.0.0",
+            capabilities={PluginCapability.EVALUATOR},
+            description="Custom evaluation logic",
+        )
+
+    async def startup(self, app, context: PluginContext | None = None):
+        # Register as an evaluator
+        register_evaluator(self)
+
+    async def evaluate_mcp_result(
+        self, context: MCPInvocationContext
+    ) -> EvaluationResult:
+        # Your custom scoring logic
+        score = self._calculate_score(context)
+        return EvaluationResult(score=score, status="success")
+
+    async def evaluate_a2a_result(
+        self, context: A2AInvocationContext
+    ) -> EvaluationResult:
+        score = self._calculate_score_a2a(context)
+        return EvaluationResult(score=score, status="success")
+
+    def _calculate_score(self, context):
+        # Implement your scoring logic
+        return 0.9 if context.success else 0.1
+
+    def _calculate_score_a2a(self, context):
+        return 0.85 if context.success else 0.15
+```
+
+2. Enable your evaluator:
+
+```bash
+export LLMROUTER_PLUGINS=mypackage.my_evaluator.MyEvaluator
+export ROUTEIQ_EVALUATOR_ENABLED=true
+```
+
+### Security Considerations
+
+1. **SSRF Protection**: Always use `context.validate_outbound_url` when making outbound HTTP requests
+2. **Timeouts**: Set appropriate timeouts for external evaluation services
+3. **Error Handling**: Evaluator failures are logged but don't block the request
+4. **Resource Limits**: Be mindful of evaluation overhead on request latency
+
 ## Troubleshooting
 
 ### Plugin not loading
