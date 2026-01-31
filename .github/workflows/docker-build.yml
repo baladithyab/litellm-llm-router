@@ -542,10 +542,15 @@ jobs:
           output: 'trivy-results.sarif'
           severity: 'CRITICAL,HIGH'
           exit-code: '0'
+          # Use vuln scanner only to avoid timeout on CUDA/large bindings
+          scanners: 'vuln'
+          # Increase timeout for large images with CUDA dependencies
+          timeout: '30m'
 
       - name: Upload Trivy scan results to GitHub Security tab
         uses: github/codeql-action/upload-sarif@2b983b380ce715a6c836c917154509c332c19b3a  # v3
-        if: always()
+        # Only upload if SARIF file was created successfully
+        if: success()
         with:
           sarif_file: 'trivy-results.sarif'
 
@@ -556,3 +561,7 @@ jobs:
           format: 'table'
           severity: 'CRITICAL,HIGH'
           exit-code: '0'
+          # Use vuln scanner only to avoid timeout on CUDA/large bindings
+          scanners: 'vuln'
+          # Increase timeout for large images with CUDA dependencies
+          timeout: '30m'
