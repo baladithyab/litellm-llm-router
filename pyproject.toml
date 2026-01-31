@@ -15,9 +15,19 @@ dependencies = [
     "pydantic>=2.5.0",
     "httpx>=0.26.0",
     # LiteLLM core (provides Router, logging, etc.)
+    # Note: Using litellm without [proxy] extra due to strict pinned dependencies in proxy extra
+    # that conflict with project requirements. Adding needed proxy deps individually below.
     "litellm>=1.81.3",
     # APScheduler - required by litellm proxy for background scheduling
     "apscheduler>=3.10.0",
+    # email-validator - required by pydantic.EmailStr (used by LiteLLM proxy SCIM)
+    "email-validator>=2.0.0",
+    # fastapi-sso - required by LiteLLM proxy SSO endpoints
+    "fastapi-sso>=0.16.0",
+    # websockets - required by LiteLLM proxy guardrails
+    "websockets>=15.0.0",
+    # redis - required by LiteLLM for Redis caching
+    "redis>=5.0.0",
     # A2A Protocol SDK (Agent-to-Agent communication)
     "a2a-sdk>=0.2.0",
     # Configuration and utilities
