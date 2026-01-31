@@ -26,6 +26,8 @@ dependencies = [
     "fastapi-sso>=0.16.0",
     # websockets - required by LiteLLM proxy guardrails
     "websockets>=15.0.0",
+    # backoff - required by LiteLLM proxy utils for retry logic
+    "backoff>=2.0.0",
     # redis - required by LiteLLM for Redis caching
     "redis>=5.0.0",
     # A2A Protocol SDK (Agent-to-Agent communication)

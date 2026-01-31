@@ -118,16 +118,16 @@ COPY --from=builder /wheels /wheels
 COPY pyproject.toml uv.lock /app/
 COPY src/ /app/src/
 
-# Install all Python dependencies using uv sync --frozen
-# --frozen: Fail if lockfile is out of sync with pyproject.toml (ensures reproducibility)
-# Order: wheels → uv sync with all production extras
+# Install all Python dependencies using uv pip install --system
+# --system: Install to system Python (not a venv) so packages are available at runtime
+# Order: wheels → uv pip install with all production extras
 RUN --mount=type=cache,target=/root/.cache/uv \
     # Install LLMRouter wheel first (not in lockfile, built from source at pinned commit)
     uv pip install --system /wheels/*.whl || true \
-    # Install project dependencies from lockfile with production extras
-    # --frozen ensures builds fail if lockfile is out of date
-    # All OTEL packages are included via the 'otel' extra in the lockfile
-    && cd /app && uv sync --frozen --no-dev --extra prod --extra db --extra otel --extra cloud --extra callbacks --extra knn \
+    # Install project dependencies with production extras
+    # --system ensures packages go to system Python, not a venv
+    # All OTEL packages are included via the 'otel' extra
+    && cd /app && uv pip install --system -e ".[prod,db,otel,cloud,callbacks,knn]" \
     # Cleanup wheels and temp files
     && rm -rf /wheels
 
