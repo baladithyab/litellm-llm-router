@@ -1220,6 +1220,7 @@ dev = [
     { name = "orjson" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
+    { name = "ruff" },
     { name = "scikit-learn" },
 ]
 
@@ -1279,6 +1280,7 @@ dev = [
     { name = "orjson", specifier = ">=3.10.0" },
     { name = "pytest", specifier = ">=8.0.0" },
     { name = "pytest-asyncio", specifier = ">=0.23.0" },
+    { name = "ruff", specifier = ">=0.14.13" },
     { name = "scikit-learn", specifier = ">=1.7.2" },
 ]
 
