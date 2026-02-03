@@ -102,8 +102,11 @@ def _register_routes(app: FastAPI, include_admin: bool = True) -> None:
         mcp_proxy_router,
         oauth_callback_router,
         mcp_jsonrpc_router,
+        mcp_sse_router,
         MCP_OAUTH_ENABLED,
         MCP_PROTOCOL_PROXY_ENABLED,
+        MCP_SSE_TRANSPORT_ENABLED,
+        MCP_SSE_LEGACY_MODE,
     )
 
     # Health router - unauthenticated K8s probes
@@ -139,6 +142,20 @@ def _register_routes(app: FastAPI, include_admin: bool = True) -> None:
     # This provides native MCP protocol (JSON-RPC 2.0 over HTTP)
     app.include_router(mcp_jsonrpc_router, prefix="")
     logger.debug("Registered mcp_jsonrpc_router (native MCP JSON-RPC at /mcp)")
+
+    # MCP SSE Transport (/mcp/sse) - for real-time streaming events
+    # Conditionally enabled based on feature flags
+    if MCP_SSE_TRANSPORT_ENABLED and not MCP_SSE_LEGACY_MODE:
+        app.include_router(mcp_sse_router, prefix="")
+        logger.info(
+            "Registered mcp_sse_router (SSE transport at /mcp/sse, "
+            "MCP_SSE_TRANSPORT_ENABLED=true, MCP_SSE_LEGACY_MODE=false)"
+        )
+    else:
+        logger.debug(
+            f"Skipped mcp_sse_router (MCP_SSE_TRANSPORT_ENABLED={MCP_SSE_TRANSPORT_ENABLED}, "
+            f"MCP_SSE_LEGACY_MODE={MCP_SSE_LEGACY_MODE})"
+        )
 
     # Feature-flagged routers
     if MCP_PROTOCOL_PROXY_ENABLED and include_admin:
