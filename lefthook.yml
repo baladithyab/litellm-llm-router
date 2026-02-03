@@ -8,9 +8,16 @@
 # Enable parallel execution for faster hooks
 assert_lefthook_installed: true
 
+# =============================================================================
+# PRE-COMMIT HOOKS
+# =============================================================================
+# Run on every commit to catch issues early
 pre-commit:
   parallel: true
   commands:
+    # ---------------------------------------------------------------------
+    # Python Linting & Formatting
+    # ---------------------------------------------------------------------
     ruff-format:
       glob: "*.py"
       exclude: "^reference/"
@@ -23,14 +30,145 @@ pre-commit:
       run: ./scripts/lint.sh check {staged_files}
       stage_fixed: true
 
+    # ---------------------------------------------------------------------
+    # YAML Linting
+    # ---------------------------------------------------------------------
     yamllint:
       glob: "*.{yaml,yml}"
       exclude: "(^reference/|^.github/)"
       run: ./scripts/lint.sh yaml {staged_files}
 
+    # ---------------------------------------------------------------------
+    # Secret Detection (API keys, passwords, tokens)
+    # ---------------------------------------------------------------------
+    detect-secrets:
+      glob: "*"
+      exclude: "(^reference/|^.git/|__pycache__|.pytest_cache|.mypy_cache|.ruff_cache)"
+      run: ./scripts/detect_secrets.sh {staged_files}
+
+    detect-private-keys:
+      glob: "*"
+      exclude: "(^reference/|^.git/)"
+      run: |
+        for file in {staged_files}; do
+          if [ -f "$file" ]; then
+            if grep -qE '-----BEGIN (RSA |DSA |EC |OPENSSH )?PRIVATE KEY-----' "$file" 2>/dev/null; then
+              echo "❌ Private key detected in: $file"
+              exit 1
+            fi
+          fi
+        done
+
+    # ---------------------------------------------------------------------
+    # File Hygiene
+    # ---------------------------------------------------------------------
+    trailing-whitespace:
+      glob: "*.{py,yaml,yml,md,json,sh}"
+      exclude: "^reference/"
+      run: |
+        for file in {staged_files}; do
+          if [ -f "$file" ] && grep -qE '\s+$' "$file" 2>/dev/null; then
+            # Auto-fix trailing whitespace
+            sed -i '' 's/[[:space:]]*$//' "$file" 2>/dev/null || sed -i 's/[[:space:]]*$//' "$file"
+            echo "Fixed trailing whitespace in: $file"
+          fi
+        done
+      stage_fixed: true
+
+    check-merge-conflict:
+      glob: "*"
+      exclude: "^reference/"
+      run: |
+        for file in {staged_files}; do
+          if [ -f "$file" ] && grep -qE '^(<<<<<<<|>>>>>>>|=======)' "$file" 2>/dev/null; then
+            echo "❌ Merge conflict markers found in: $file"
+            exit 1
+          fi
+        done
+
+    check-large-files:
+      glob: "*"
+      exclude: '(^reference/|^models/|[.]lock$)'
+      run: |
+        MAX_SIZE=1048576  # 1MB in bytes
+        for file in {staged_files}; do
+          if [ -f "$file" ]; then
+            size=$(wc -c < "$file" | tr -d ' ')
+            if [ "$size" -gt "$MAX_SIZE" ]; then
+              echo "❌ File too large (>1MB): $file (${size} bytes)"
+              exit 1
+            fi
+          fi
+        done
+
+# =============================================================================
+# PRE-PUSH HOOKS
+# =============================================================================
+# Run before pushing to ensure quality
+pre-push:
+  parallel: false
+  commands:
+    # ---------------------------------------------------------------------
+    # Unit Tests (fast subset)
+    # ---------------------------------------------------------------------
+    unit-tests:
+      run: |
+        echo "🧪 Running unit tests..."
+        uv run pytest tests/unit/ -x -q --tb=short 2>&1 | tail -20
+
+    # ---------------------------------------------------------------------
+    # Type Checking (if mypy is configured)
+    # ---------------------------------------------------------------------
+    type-check:
+      run: |
+        if command -v uv &>/dev/null && uv run python -c "import mypy" 2>/dev/null; then
+          echo "🔍 Running type checks..."
+          uv run mypy src/litellm_llmrouter/ --ignore-missing-imports --no-error-summary 2>&1 | head -30 || true
+        fi
+
+    # ---------------------------------------------------------------------
+    # Security Scanning (full repo)
+    # ---------------------------------------------------------------------
+    security-scan:
+      run: |
+        echo "🔒 Scanning for secrets in staged changes..."
+        ./scripts/detect_secrets.sh --full-scan
+
+# =============================================================================
+# POST-COMMIT HOOKS
+# =============================================================================
 post-commit:
   commands:
     reminder:
       run: |
+        echo ""
         echo "✅ Commit successful!"
-        echo "   Remember to run tests before pushing: pytest tests/"
+        echo "   Remember to run full tests before pushing: uv run pytest"
+        echo ""
+
+# =============================================================================
+# POST-CHECKOUT HOOKS
+# =============================================================================
+# Run after switching branches
+post-checkout:
+  commands:
+    sync-deps:
+      run: |
+        # Only run if pyproject.toml changed between branches
+        if git diff HEAD@{1} HEAD --name-only 2>/dev/null | grep -q "pyproject.toml"; then
+          echo "📦 pyproject.toml changed, consider running: uv sync"
+        fi
+
+# =============================================================================
+# POST-MERGE HOOKS
+# =============================================================================
+# Run after merging branches
+post-merge:
+  commands:
+    sync-deps:
+      run: |
+        # Check if pyproject.toml was updated in the merge
+        if git diff ORIG_HEAD HEAD --name-only 2>/dev/null | grep -q "pyproject.toml"; then
+          echo "📦 pyproject.toml was updated, running: uv sync"
+          uv sync
+        fi
