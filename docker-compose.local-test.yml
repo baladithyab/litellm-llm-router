@@ -192,6 +192,8 @@ services:
       - ADMIN_API_KEYS=sk-test-admin-key,sk-test-master-key
       # Enable database for full feature testing
       - DATABASE_URL=postgresql://litellm:testpassword@postgres:5432/litellm
+      # Run database migrations on startup (safe for single-node local testing)
+      - LITELLM_RUN_DB_MIGRATIONS=true
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       # AWS Bedrock - Use EC2 instance metadata service (IMDSv2)
@@ -202,6 +204,8 @@ services:
       - A2A_GATEWAY_ENABLED=true
       - MCP_GATEWAY_ENABLED=true
       - LLMROUTER_ENABLE_MCP_TOOL_INVOCATION=true
+      # Allow outbound requests to private IPs (Docker network) for MCP tool invocation
+      - LLMROUTER_OUTBOUND_ALLOW_PRIVATE=true
       - STORE_MODEL_IN_DB=true
       # LLMRouter Settings
       - LLMROUTER_MODELS_PATH=/app/models
@@ -231,6 +235,35 @@ services:
       timeout: 5s
       retries: 5
       start_period: 30s
+    networks:
+      - litellm-test-network
+
+  # ==========================================================================
+  # MCP Stub Server - Deterministic test server for MCP gateway validation
+  # Purpose: Provides stub.echo, stub.sum tools for E2E validation
+  # ==========================================================================
+  mcp-stub-server:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.local
+    container_name: litellm-test-mcp-stub
+    ports:
+      - "9100:9100"
+    volumes:
+      - ./scripts:/app/scripts:ro
+    environment:
+      - MCP_STUB_NAME=Test Stub MCP Server
+      - MCP_STUB_VERSION=0.1.0
+      - MCP_STUB_PORT=9100
+    # Override entrypoint to bypass gateway's litellm startup
+    entrypoint: ["/usr/bin/tini", "--"]
+    command: ["python", "/app/scripts/mcp_stub_server.py"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9100/mcp/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
     networks:
       - litellm-test-network
 
