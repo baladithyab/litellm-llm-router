@@ -1,4 +1,8 @@
 # RouteIQ Gateway
+
+> **Attribution**:
+> RouteIQ is built on top of upstream [LiteLLM](https://github.com/BerriAI/litellm) for proxy/API compatibility and [LLMRouter](https://github.com/ulab-uiuc/LLMRouter) for ML routing.
+
 Cloud-native General AI Gateway (powered by LiteLLM) with pluggable routing intelligence + scripted MLOps pipeline
 
 <div align="center">
@@ -175,4 +179,4 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## Acknowledgments
 
 - [LiteLLM](https://github.com/BerriAI/litellm) for the amazing proxy foundation.
-- [LLMRouter](https://github.com/ray-project/llm-router) for the routing intelligence concepts.
+- [LLMRouter](https://github.com/ulab-uiuc/LLMRouter) for the routing intelligence concepts.

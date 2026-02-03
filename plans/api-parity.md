@@ -1,6 +1,9 @@
-# API Parity Analysis: LiteLLM + LLMRouter Gateway vs Default LiteLLM
+# API Parity Analysis: RouteIQ Gateway vs Default LiteLLM
 
-This document analyzes the API parity between our custom LiteLLM + LLMRouter Gateway implementation and the default LiteLLM proxy server.
+> **Attribution**:
+> RouteIQ is built on top of upstream [LiteLLM](https://github.com/BerriAI/litellm) for proxy/API compatibility and [LLMRouter](https://github.com/ulab-uiuc/LLMRouter) for ML routing.
+
+This document analyzes the API parity between our custom RouteIQ Gateway implementation and the default LiteLLM proxy server.
 
 ## Executive Summary
 
@@ -322,7 +325,7 @@ All gaps identified above have been documented in the spec files and are planned
 
 - **LiteLLM Reference Version**: Latest (from submodule)
 - **Analysis Date**: January 2026
-- **Our Implementation**: LiteLLM + LLMRouter Gateway v1.0
+- **Our Implementation**: RouteIQ Gateway v1.0
 
 ---
 

@@ -1,5 +1,8 @@
 # Documentation Consolidation Plan
 
+> **Attribution**:
+> RouteIQ is built on top of upstream [LiteLLM](https://github.com/BerriAI/litellm) for proxy/API compatibility and [LLMRouter](https://github.com/ulab-uiuc/LLMRouter) for ML routing.
+
 **Status:** Draft
 **Date:** 2026-01-30
 **Objective:** Consolidate the RouteIQ Gateway documentation into a cohesive, non-redundant set with clear navigation.

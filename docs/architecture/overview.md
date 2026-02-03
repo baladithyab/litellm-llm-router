@@ -1,5 +1,8 @@
 # RouteIQ Gateway Architecture
 
+> **Attribution**:
+> RouteIQ is built on top of upstream [LiteLLM](https://github.com/BerriAI/litellm) for proxy/API compatibility and [LLMRouter](https://github.com/ulab-uiuc/LLMRouter) for ML routing.
+
 **RouteIQ Gateway** is designed as a high-performance, cloud-native AI Gateway that sits between your applications and LLM providers.
 
 ## High-Level Overview

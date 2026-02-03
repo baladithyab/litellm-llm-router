@@ -1,5 +1,8 @@
 # Skills Gateway
 
+> **Attribution**:
+> RouteIQ is built on top of upstream [LiteLLM](https://github.com/BerriAI/litellm) for proxy/API compatibility and [LLMRouter](https://github.com/ulab-uiuc/LLMRouter) for ML routing.
+
 **RouteIQ Gateway** features a Skills Gateway that allows you to register and execute Python functions as "skills" that can be invoked by models or other agents.
 
 ## Overview

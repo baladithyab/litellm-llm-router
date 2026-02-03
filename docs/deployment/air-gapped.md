@@ -1,5 +1,8 @@
 # Gate 9: Moat-Mode Validation Plan + Cloud-Agnostic HA Readiness
 
+> **Attribution:**
+> RouteIQ is built on top of upstream [LiteLLM](https://github.com/BerriAI/litellm) for proxy/API compatibility and [LLMRouter](https://github.com/ulab-uiuc/LLMRouter) for ML routing.
+
 **Document Version:** 1.0
 **Date:** 2026-01-22
 **Status:** Draft for Review
@@ -9,7 +12,7 @@
 
 ## Executive Summary
 
-This document establishes validation criteria and deployment protocols for operating the LiteLLM + LLMRouter gateway in **"moat-mode"** environments:
+This document establishes validation criteria and deployment protocols for operating the RouteIQ Gateway in **"moat-mode"** environments:
 
 - **Air-gapped networks** with no external internet access
 - **Controlled-egress** environments with explicit allowlists for outbound traffic
@@ -331,9 +334,11 @@ gunzip -c /backup/postgres/litellm_20260122_020000.sql.gz | \
 docker compose start litellm-gateway-1 litellm-gateway-2
 ```
 
+**Moat-Mode Consideration:** Redis backup is **optional**. If Redis data is lost (e.g., node failure), the gateway will rebuild cache from database + upstream LLM providers.
+
 ---
 
-### 3.2 Redis State Management
+### 3.3 Redis State Management
 
 **Purpose:** Ephemeral caching and rate limiting:
 - Response caching (LRU eviction policy)
@@ -373,43 +378,6 @@ docker cp /backup/redis/dump_<timestamp>.rdb litellm-redis:/data/dump.rdb
 docker compose start redis
 ```
 
-**Moat-Mode Consideration:** Redis backup is **optional**. If Redis data is lost (e.g., node failure), the gateway will rebuild cache from database + upstream LLM providers.
-
----
-
-### 3.3 Model Artifacts (LLMRouter)
-
-**Purpose:** Trained routing models (`.pt` files for KNN, SVM, MLP strategies).
-
-**Storage Options:**
-
-1. **Volume Mounts** (HA-compatible with shared NFS):
-   ```yaml
-   volumes:
-     - /mnt/nfs/llmrouter/models:/app/models:ro
-   ```
-
-2. **S3-Compatible Storage** (MinIO, Ceph):
-   ```bash
-   # Environment variables
-   LLMROUTER_MODEL_S3_BUCKET=llm-models
-   LLMROUTER_MODEL_S3_KEY=knn_router_v2.pt
-   # Use MinIO endpoint instead of AWS S3
-   AWS_ENDPOINT_URL=http://minio:9000
-   ```
-
-**Backup:**
-```bash
-# Version models in S3/MinIO with object versioning enabled
-mc version enable myminio/llm-models
-```
-
-**Disaster Recovery:**
-```bash
-# Restore specific model version
-mc cp myminio/llm-models/knn_router_v2.pt?versionId=<version> ./models/
-```
-
 ---
 
 ## 4. Upgrade Strategy
@@ -425,7 +393,7 @@ mc cp myminio/llm-models/knn_router_v2.pt?versionId=<version> ./models/
 
 ```bash
 # 1. Pull new image
-docker pull ghcr.io/baladithyab/litellm-llm-router:v2.0.0
+docker pull internal-registry.company.com/litellm-llm-router:v2.0.0
 
 # 2. Update gateway-1 (Nginx routes traffic to gateway-2)
 docker compose stop litellm-gateway-1
@@ -466,7 +434,7 @@ spec:
     spec:
       containers:
       - name: gateway
-        image: ghcr.io/baladithyab/litellm-llm-router:v2.0.0
+        image: internal-registry.company.com/litellm-llm-router:v2.0.0
         readinessProbe:
           httpGet:
             path: /health/readiness
@@ -491,6 +459,7 @@ graph LR
     C -->|Switch to| D
     A -->|Shutdown| E[Terminated]
 ```
+
 
 **Migration Script (Idempotent):**
 ```sql
@@ -573,8 +542,6 @@ ON CONFLICT (lock_name) DO NOTHING;
 ---
 
 ## 5. Observability Requirements for Restricted Networks
-
-**Reference:** [`GATE8_OBSERVABILITY_VALIDATION_REPORT.md`](../../GATE8_OBSERVABILITY_VALIDATION_REPORT.md)
 
 ### 5.1 OpenTelemetry Collector Topology
 
@@ -968,49 +935,7 @@ if __name__ == '__main__':
 
 ---
 
-### 7.3 Database Backup/Restore Validation
-
-**Objective:** Verify zero data loss during disaster recovery.
-
-```bash
-#!/bin/bash
-# tests/moat-mode/test_backup_restore.sh
-
-# 1. Create test data
-curl -X POST http://localhost:8080/key/generate \
-  -H "Authorization: Bearer sk-master-key" \
-  -d '{"metadata": {"test": "backup-restore"}}' | tee /tmp/test_key.json
-
-TEST_KEY=$(jq -r .key /tmp/test_key.json)
-
-# 2. Perform backup
-docker exec litellm-postgres pg_dump -U litellm litellm > /tmp/backup.sql
-
-# 3. Simulate disaster (drop database)
-docker exec litellm-postgres psql -U litellm -c "DROP DATABASE litellm;"
-docker exec litellm-postgres psql -U litellm -c "CREATE DATABASE litellm;"
-
-# 4. Restore from backup
-cat /tmp/backup.sql | docker exec -i litellm-postgres psql -U litellm litellm
-
-# 5. Verify test key still works
-RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" \
-  http://localhost:8080/key/info \
-  -H "Authorization: Bearer $TEST_KEY")
-
-if [ "$RESPONSE" == "200" ]; then
-  echo "✅ PASS: Backup/restore successful, key recovered"
-else
-  echo "❌ FAIL: Key lost after restore (HTTP $RESPONSE)"
-  exit 1
-fi
-```
-
-**Expected Result:** All virtual keys functional after restore.
-
----
-
-### 7.4 Observability Self-Containment Test
+### 7.3 Observability Self-Containment Test
 
 **Objective:** Traces/metrics stored locally, no cloud export.
 
@@ -1535,13 +1460,6 @@ graph TB
     GW1 --> Redis
     GW2 --> Redis
     GW3 --> Redis
-
-    GW1 -->|OTLP| OTEL
-    GW2 -->|OTLP| OTEL
-    GW3 -->|OTLP| OTEL
-
-    OTEL --> Jaeger
-    OTEL --> Prom
 
     GW1 -.->|HTTPS| LLM1
     GW2 -.->|HTTPS| LLM2

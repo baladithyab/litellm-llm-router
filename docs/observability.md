@@ -1,6 +1,9 @@
 # Observability Guide
 
-LiteLLM + LLMRouter supports OpenTelemetry (OTEL) for distributed tracing. This guide covers three backends:
+> **Attribution**:
+> RouteIQ is built on top of upstream [LiteLLM](https://github.com/BerriAI/litellm) for proxy/API compatibility and [LLMRouter](https://github.com/ulab-uiuc/LLMRouter) for ML routing.
+
+RouteIQ supports OpenTelemetry (OTEL) for distributed tracing. This guide covers three backends:
 
 1. **Jaeger** - Simple local setup
 2. **Grafana Tempo** - Production-grade with S3 storage
@@ -25,7 +28,7 @@ curl http://localhost:4000/v1/chat/completions \
   -d '{"model": "claude-haiku", "messages": [{"role": "user", "content": "Hello"}]}'
 ```
 
-Then open Jaeger UI → Select "litellm-gateway" service → Find Traces
+Then open Jaeger UI → Select "routeiq-gateway" service → Find Traces
 
 ---
 
@@ -39,7 +42,7 @@ Best for: Local development, debugging, simple deployments
 environment:
   - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
   - OTEL_EXPORTER_OTLP_PROTOCOL=grpc
-  - OTEL_SERVICE_NAME=litellm-gateway
+  - OTEL_SERVICE_NAME=routeiq-gateway
   - OTEL_TRACES_EXPORTER=otlp
 ```
 
@@ -66,7 +69,7 @@ Best for: Production, S3 storage, Grafana ecosystem integration
 environment:
   - OTEL_EXPORTER_OTLP_ENDPOINT=http://tempo:4317
   - OTEL_EXPORTER_OTLP_PROTOCOL=grpc
-  - OTEL_SERVICE_NAME=litellm-gateway
+  - OTEL_SERVICE_NAME=routeiq-gateway
   - OTEL_TRACES_EXPORTER=otlp
 ```
 
@@ -126,11 +129,11 @@ The ADOT Collector receives OTLP traces and exports to CloudWatch X-Ray.
 ```yaml
 # docker-compose.cloudwatch.yml
 services:
-  litellm-gateway:
+  routeiq-gateway:
     # ... your gateway config ...
     environment:
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://adot-collector:4317
-      - OTEL_SERVICE_NAME=litellm-gateway
+      - OTEL_SERVICE_NAME=routeiq-gateway
       - OTEL_TRACES_EXPORTER=otlp
 
   adot-collector:
@@ -195,7 +198,7 @@ Attach this policy to your EC2 instance role:
 #### View Traces
 
 1. Open AWS Console → CloudWatch → X-Ray traces
-2. Filter by service name: `litellm-gateway`
+2. Filter by service name: `routeiq-gateway`
 3. Use Service Map for dependency visualization
 
 ---
@@ -245,7 +248,7 @@ RouteIQ Gateway supports the following environment variables for configuring Ope
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `OTEL_SERVICE_NAME` | `litellm-gateway` | Service name shown in traces/metrics |
+| `OTEL_SERVICE_NAME` | `routeiq-gateway` | Service name shown in traces/metrics |
 | `OTEL_SERVICE_VERSION` | `1.0.0` | Service version attribute |
 | `OTEL_DEPLOYMENT_ENVIRONMENT` | `production` | Deployment environment (production, staging, dev) |
 

@@ -1,5 +1,8 @@
 # Implementation Backlog
 
+> **Attribution**:
+> RouteIQ is built on top of upstream [LiteLLM](https://github.com/BerriAI/litellm) for proxy/API compatibility and [LLMRouter](https://github.com/ulab-uiuc/LLMRouter) for ML routing.
+
 **Status:** Active  
 **Last Updated:** 2026-01-27  
 **Context:** Consolidated backlog for Cloud-Native, Security, and MLOps enhancements.
@@ -22,7 +25,7 @@
 - **Validation:** Passed [Gate 6 MCP Validation](../GATE6_MCP_VALIDATION_REPORT.md).
 
 ### WS5: Rebranding & Documentation
-- **Rebranding:** Unified "LiteLLM + LLMRouter" identity.
+- **Rebranding:** Unified "RouteIQ" identity.
 - **Docs Refresh:** Updated [API Reference](../docs/api-reference.md) and [Deployment Guide](../docs/deployment.md).
 - **Roadmap:** Established [Technical Roadmap](technical-roadmap.md).
 

@@ -1,5 +1,8 @@
 # MCP Gateway - Model Context Protocol
 
+> **Attribution**:
+> RouteIQ is built on top of upstream [LiteLLM](https://github.com/BerriAI/litellm) for proxy/API compatibility and [LLMRouter](https://github.com/ulab-uiuc/LLMRouter) for ML routing.
+
 **RouteIQ Gateway** includes a fully integrated MCP (Model Context Protocol) Gateway, allowing you to bridge MCP servers to LLMs and expose tools and resources securely.
 
 This guide covers the MCP (Model Context Protocol) gateway functionality for extending LLMs with external tools and data sources.
@@ -377,7 +380,7 @@ See [Security Guide](security.md#ssrf-protection) for full details.
 
 ## HA Sync (High Availability)
 
-When running multiple LiteLLM replicas behind a load balancer, MCP server registrations
+When running multiple RouteIQ Gateway replicas behind a load balancer, MCP server registrations
 need to be shared across replicas. The MCP gateway supports Redis-backed synchronization:
 
 ### Enabling HA Sync
@@ -403,14 +406,14 @@ need to be shared across replicas. The MCP gateway supports Redis-backed synchro
 
 ```yaml
 services:
-  litellm-gateway-1:
+  routeiq-gateway-1:
     environment:
       - MCP_GATEWAY_ENABLED=true
       - MCP_HA_SYNC_ENABLED=true
       - REDIS_HOST=redis
       - REDIS_PORT=6379
 
-  litellm-gateway-2:
+  routeiq-gateway-2:
     environment:
       - MCP_GATEWAY_ENABLED=true
       - MCP_HA_SYNC_ENABLED=true

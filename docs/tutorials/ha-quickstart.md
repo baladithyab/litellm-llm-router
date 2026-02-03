@@ -1,5 +1,8 @@
 # Quickstart: High Availability (HA) Setup
 
+> **Attribution**:
+> RouteIQ is built on top of upstream [LiteLLM](https://github.com/BerriAI/litellm) for proxy/API compatibility and [LLMRouter](https://github.com/ulab-uiuc/LLMRouter) for ML routing.
+
 This guide demonstrates a production-ready High Availability (HA) setup for RouteIQ Gateway using Docker Compose.
 
 ## Architecture

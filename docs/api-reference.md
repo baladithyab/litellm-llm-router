@@ -1,6 +1,9 @@
 # API Reference
 
-The LiteLLM + LLMRouter gateway exposes an OpenAI-compatible API.
+> **Attribution**:
+> RouteIQ is built on top of upstream [LiteLLM](https://github.com/BerriAI/litellm) for proxy/API compatibility and [LLMRouter](https://github.com/ulab-uiuc/LLMRouter) for ML routing.
+
+The RouteIQ Gateway exposes an OpenAI-compatible API.
 
 ## Base URL
 

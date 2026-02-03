@@ -1,5 +1,8 @@
 # Deployment Guide
 
+> **Attribution**:
+> RouteIQ is built on top of upstream [LiteLLM](https://github.com/BerriAI/litellm) for proxy/API compatibility and [LLMRouter](https://github.com/ulab-uiuc/LLMRouter) for ML routing.
+
 RouteIQ Gateway is designed to be cloud-native and deployment-agnostic. This guide covers deployment using Docker, Docker Compose, and Kubernetes.
 
 ## Reproducible Builds

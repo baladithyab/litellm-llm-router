@@ -1,5 +1,8 @@
 # ML-Based Routing Architecture (Cloud-Native)
 
+> **Attribution**:
+> RouteIQ is built on top of upstream [LiteLLM](https://github.com/BerriAI/litellm) for proxy/API compatibility and [LLMRouter](https://github.com/ulab-uiuc/LLMRouter) for ML routing.
+
 This document describes the closed-loop MLOps architecture for **RouteIQ Gateway** routing.
 
 Key principle: the **Data Plane** (serving) is decoupled from the **Control Plane** (training, registry, and rollout). The data plane should continue serving traffic even if control-plane systems are unavailable.

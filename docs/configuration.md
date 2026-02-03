@@ -1,6 +1,9 @@
 # Configuration Guide
 
-This guide covers all configuration options for the LiteLLM + LLMRouter gateway.
+> **Attribution**:
+> RouteIQ is built on top of upstream [LiteLLM](https://github.com/BerriAI/litellm) for proxy/API compatibility and [LLMRouter](https://github.com/ulab-uiuc/LLMRouter) for ML routing.
+
+This guide covers all configuration options for the RouteIQ Gateway.
 
 ## Configuration File Location
 
@@ -224,7 +227,7 @@ For local development and testing, use the local test docker-compose:
 docker compose -f docker-compose.local-test.yml up -d
 
 # Access services:
-# - LiteLLM Gateway: http://localhost:4010
+# - RouteIQ Gateway: http://localhost:4010
 # - Jaeger UI: http://localhost:16686
 # - MLflow UI: http://localhost:5050
 # - MinIO Console: http://localhost:9001
@@ -237,7 +240,7 @@ docker compose -f docker-compose.local-test.yml down
 ```
 
 The local stack includes:
-- **LiteLLM Gateway** with all features enabled (A2A, MCP, hot reload)
+- **RouteIQ Gateway** with all features enabled (A2A, MCP, hot reload)
 - **PostgreSQL** for persistence
 - **Redis** for caching
 - **Jaeger** for distributed tracing

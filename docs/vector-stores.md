@@ -1,5 +1,8 @@
 # Vector Stores Integration
 
+> **Attribution**:
+> RouteIQ is built on top of upstream [LiteLLM](https://github.com/BerriAI/litellm) for proxy/API compatibility and [LLMRouter](https://github.com/ulab-uiuc/LLMRouter) for ML routing.
+
 RouteIQ Gateway provides vector store capabilities through two primary mechanisms: inherited OpenAI-compatible endpoints and planned deep integrations with external vector databases.
 
 ## Inherited OpenAI-Compatible Endpoints

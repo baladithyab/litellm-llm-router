@@ -1,5 +1,8 @@
 # Cloud-Native Architectural Roadmap
-## Transitioning LiteLLM + LLM-Router to Production-Grade Infrastructure
+## Transitioning RouteIQ to Production-Grade Infrastructure
+
+> **Attribution**:
+> RouteIQ is built on top of upstream [LiteLLM](https://github.com/BerriAI/litellm) for proxy/API compatibility and [LLMRouter](https://github.com/ulab-uiuc/LLMRouter) for ML routing.
 
 **Document Version:** 1.1  
 **Last Updated:** 2026-01-30  
@@ -20,7 +23,7 @@ For the authoritative release proof and validation steps, please refer to the [R
 
 ## Executive Summary
 
-This roadmap provides a comprehensive, phased approach to transform the LiteLLM + LLM-Router combination into a robust, production-grade cloud-native system. The transformation emphasizes High Availability (HA), observability, MLOps excellence, and operational resilience while maintaining the system's core value proposition of intelligent ML-powered routing.
+This roadmap provides a comprehensive, phased approach to transform the RouteIQ combination into a robust, production-grade cloud-native system. The transformation emphasizes High Availability (HA), observability, MLOps excellence, and operational resilience while maintaining the system's core value proposition of intelligent ML-powered routing.
 
 **Update (Jan 2026):** Milestones A, B, and C (P0-P2) have been executed. See [`docs/release-checklist.md`](../docs/release-checklist.md) for release verification and [`plans/p1-remove-import-side-effects-plan.md`](p1-remove-import-side-effects-plan.md) for the architectural cleanup details. The focus now shifts to Milestone D+ (Post-MVP).
 

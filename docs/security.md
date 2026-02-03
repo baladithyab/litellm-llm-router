@@ -1,5 +1,8 @@
 # Security Guide
 
+> **Attribution**:
+> RouteIQ is built on top of upstream [LiteLLM](https://github.com/BerriAI/litellm) for proxy/API compatibility and [LLMRouter](https://github.com/ulab-uiuc/LLMRouter) for ML routing.
+
 Security is a core design principle of RouteIQ Gateway. This guide outlines the security features and best practices for securing your deployment.
 
 ## Authentication Boundaries

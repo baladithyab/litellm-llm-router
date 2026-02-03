@@ -1,6 +1,9 @@
 # AWS Deployment Guide
 
-This guide covers deploying LiteLLM + LLMRouter to AWS using various compute options.
+> **Attribution**:
+> RouteIQ is built on top of upstream [LiteLLM](https://github.com/BerriAI/litellm) for proxy/API compatibility and [LLMRouter](https://github.com/ulab-uiuc/LLMRouter) for ML routing.
+
+This guide covers deploying RouteIQ to AWS using various compute options.
 
 ## Component Overview
 
@@ -8,7 +11,7 @@ This guide covers deploying LiteLLM + LLMRouter to AWS using various compute opt
 
 | Component | Description | Local Testing | AWS Production |
 |-----------|-------------|---------------|----------------|
-| **LiteLLM Gateway** | Core API proxy and routing engine | Docker container | ECS/EKS/Fargate/Lambda |
+| **RouteIQ Gateway** | Core API proxy and routing engine | Docker container | ECS/EKS/Fargate/Lambda |
 
 ### Optional Components
 
@@ -20,7 +23,7 @@ This guide covers deploying LiteLLM + LLMRouter to AWS using various compute opt
 | **Tracing/OTEL** | Distributed tracing, observability | Docker (jaeger) | **AWS X-Ray**, **CloudWatch**, **Amazon Managed Grafana** |
 | **MLflow** | Model experiment tracking | Docker (mlflow) | **SageMaker**, **S3 + DynamoDB**, or **self-hosted on ECS** |
 
-> **Note**: The LiteLLM Gateway can run in a **minimal configuration** with just environment variables and no external dependencies. Add optional components as needed for your use case.
+> **Note**: The RouteIQ Gateway can run in a **minimal configuration** with just environment variables and no external dependencies. Add optional components as needed for your use case.
 
 ### Minimal Deployment (Gateway Only)
 
@@ -31,7 +34,7 @@ For simple use cases, deploy just the gateway with environment variables:
 docker run -p 4000:4000 \
   -e LITELLM_MASTER_KEY=sk-your-key \
   -e AWS_REGION=us-east-1 \
-  litellm-llmrouter:latest
+  routeiq-gateway:latest
 ```
 
 ### Full Production Deployment
@@ -46,7 +49,7 @@ docker run -p 4000:4000 \
   -e REDIS_HOST=elasticache-endpoint \
   -e CONFIG_S3_BUCKET=my-config-bucket \
   -e OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317 \
-  litellm-llmrouter:latest
+  routeiq-gateway:latest
 ```
 
 ## Architecture Overview
@@ -92,7 +95,7 @@ docker run -p 4000:4000 \
 
 | Local (docker-compose) | AWS Production | Purpose |
 |------------------------|----------------|---------|
-| `litellm-gateway` container | ECS Fargate / EKS / App Runner | LLM Gateway (mandatory) |
+| `routeiq-gateway` container | ECS Fargate / EKS / App Runner | LLM Gateway (mandatory) |
 | `postgres` container | Amazon RDS / Aurora PostgreSQL | API keys, spend tracking |
 | `redis` container | ElastiCache Redis / Valkey / MemoryDB | Caching, rate limiting |
 | `minio` container | Amazon S3 | Config files, ML models |
@@ -123,20 +126,20 @@ docker run -p 4000:4000 \
 
 ```bash
 # Create ECR repository
-aws ecr create-repository --repository-name litellm-llmrouter
+aws ecr create-repository --repository-name routeiq-gateway
 
 # Build and push
-docker build -t litellm-llmrouter -f docker/Dockerfile .
-docker tag litellm-llmrouter:latest <account>.dkr.ecr.<region>.amazonaws.com/litellm-llmrouter:latest
+docker build -t routeiq-gateway -f docker/Dockerfile .
+docker tag routeiq-gateway:latest <account>.dkr.ecr.<region>.amazonaws.com/routeiq-gateway:latest
 aws ecr get-login-password | docker login --username AWS --password-stdin <account>.dkr.ecr.<region>.amazonaws.com
-docker push <account>.dkr.ecr.<region>.amazonaws.com/litellm-llmrouter:latest
+docker push <account>.dkr.ecr.<region>.amazonaws.com/routeiq-gateway:latest
 ```
 
 ### Step 2: Create ECS Task Definition
 
 ```json
 {
-  "family": "litellm-llmrouter",
+  "family": "routeiq-gateway",
   "networkMode": "awsvpc",
   "requiresCompatibilities": ["FARGATE"],
   "cpu": "1024",
@@ -145,8 +148,8 @@ docker push <account>.dkr.ecr.<region>.amazonaws.com/litellm-llmrouter:latest
   "taskRoleArn": "arn:aws:iam::<account>:role/litellm-task-role",
   "containerDefinitions": [
     {
-      "name": "litellm-gateway",
-      "image": "<account>.dkr.ecr.<region>.amazonaws.com/litellm-llmrouter:latest",
+      "name": "routeiq-gateway",
+      "image": "<account>.dkr.ecr.<region>.amazonaws.com/routeiq-gateway:latest",
       "portMappings": [{"containerPort": 4000, "protocol": "tcp"}],
       "environment": [
         {"name": "LITELLM_MASTER_KEY", "value": "sk-production-key"},
@@ -161,7 +164,7 @@ docker push <account>.dkr.ecr.<region>.amazonaws.com/litellm-llmrouter:latest
       "logConfiguration": {
         "logDriver": "awslogs",
         "options": {
-          "awslogs-group": "/ecs/litellm-llmrouter",
+          "awslogs-group": "/ecs/routeiq-gateway",
           "awslogs-region": "<region>",
           "awslogs-stream-prefix": "ecs"
         }
@@ -203,7 +206,7 @@ For teams with Kubernetes expertise:
 replicaCount: 3
 
 image:
-  repository: <account>.dkr.ecr.<region>.amazonaws.com/litellm-llmrouter
+  repository: <account>.dkr.ecr.<region>.amazonaws.com/routeiq-gateway
   tag: latest
   pullPolicy: Always
 

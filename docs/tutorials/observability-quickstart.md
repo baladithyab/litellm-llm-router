@@ -1,5 +1,8 @@
 # Quickstart: Observability with OpenTelemetry
 
+> **Attribution**:
+> RouteIQ is built on top of upstream [LiteLLM](https://github.com/BerriAI/litellm) for proxy/API compatibility and [LLMRouter](https://github.com/ulab-uiuc/LLMRouter) for ML routing.
+
 This guide sets up RouteIQ Gateway with a full OpenTelemetry (OTel) stack using Jaeger for tracing. This allows you to visualize request flows, routing decisions, and latency breakdowns.
 
 ## Architecture

@@ -1,5 +1,8 @@
 # MLOps Training Guide
 
+> **Attribution**:
+> RouteIQ is built on top of upstream [LiteLLM](https://github.com/BerriAI/litellm) for proxy/API compatibility and [LLMRouter](https://github.com/ulab-uiuc/LLMRouter) for ML routing.
+
 This guide covers training, evaluating, and deploying custom LLMRouter routing models.
 
 > **Note:** The MLOps workflow in RouteIQ is currently **script-driven**. Training and deployment are triggered via external scripts or CI/CD pipelines, not by a background job running inside the gateway itself.
