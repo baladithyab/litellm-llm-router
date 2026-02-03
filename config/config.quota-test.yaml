@@ -1,0 +1,20 @@
+# =============================================================================
+# Minimal config for TG3.1 quota enforcement testing
+# =============================================================================
+# Uses a fake model that returns deterministic responses.
+# The model doesn't actually exist, but this allows quota testing
+# without real LLM credentials.
+# =============================================================================
+
+model_list:
+  - model_name: test-model
+    litellm_params:
+      model: fake/test-model
+      api_key: fake-key
+      api_base: http://localhost:9999  # Non-existent but OK for quota testing
+    model_info:
+      input_cost_per_token: 0.00001
+      output_cost_per_token: 0.00002
+
+general_settings:
+  master_key: quota-test-master-key
