@@ -114,6 +114,23 @@ pytest tests/test_strategies.py -v
 - Add docstrings to new code
 - Include examples where helpful
 
+### Branding & Attribution
+
+We maintain strict attribution to upstream projects.
+
+**Canonical Attribution Block:**
+> **Attribution**:
+> RouteIQ is built on top of upstream [LiteLLM](https://github.com/BerriAI/litellm) for proxy/API compatibility and [LLMRouter](https://github.com/ulab-uiuc/LLMRouter) for ML routing.
+
+**Checklist:**
+- [ ] Refer to this product as **RouteIQ**.
+- [ ] Refer to upstream components as **LiteLLM** or **LLMRouter**.
+- [ ] **Do not** rename environment variables (keep `LITELLM_*`, e.g., `LITELLM_MASTER_KEY`).
+- [ ] **Rule**: Avoid claiming RouteIQ implements features that are only inherited from upstream.
+
+**Verification:**
+Run `git grep -n "LiteLLM" docs plans README.md` to sanity-check attribution contexts.
+
 ## Pull Request Process
 
 1. Fork the repository
