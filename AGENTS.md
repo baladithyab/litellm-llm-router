@@ -245,46 +245,81 @@ The `reference/litellm/` directory is a git submodule containing upstream LiteLL
 uv run pytest tests/unit/test_file.py -v -s
 
 # Run with debugger
-uv run pytest tests/unit/test_file.py --pdb
+uv run pytest tests/unit/test_file.py --trace
 
 # Run specific test
 uv run pytest tests/unit/test_file.py::test_function -v
 ```
 
-## PUSHING CHANGES (CODE DEFENDER / rr)
+## WORKFLOW & PUSHING CHANGES
+
+### Task Group (TG) Workflow
+
+For each Task Group (TG), follow this branch-based workflow to ensure clean history and
+minimize remote push friction:
+
+1.  **Create Feature Branch**:
+    Name your branch using the convention `tg<id>-<short-desc>`.
+    ```bash
+    git checkout -b tg123-feature-name
+    ```
+
+2.  **Local Development**:
+    Make **local commits freely**. You do not need to push every commit to the remote.
+    Run tests and linting locally as needed.
+    ```bash
+    git add .
+    git commit -m "feat: implement part 1"
+    # ... more work ...
+    git commit -m "fix: correct logic"
+    ```
+
+3.  **Squash Merge to Main**:
+    When the TG is complete, squash all changes into a single commit on `main`.
+    ```bash
+    # Switch to main
+    git checkout main
+
+    # Squash merge the feature branch
+    git merge --squash tg123-feature-name
+
+    # Commit with a descriptive message
+    git commit -m "feat: complete TG123 feature name"
+    ```
+
+4.  **Bulk Push**:
+    Push to remote only when ready to publish (e.g., after squash merge).
+    Use `rr` if local push is blocked.
+
+### Remote Execution (rr - Road Runner)
 
 Local `git push` may be blocked by Code Defender. When this happens, use the `rr`
 (Road Runner) tool to push from a remote machine with unrestricted access.
 
-### Available rr Push Tasks
+**Do not use rr to push every small commit; use it to publish milestones (e.g., squashed TG commit) or to run GitHub Actions when needed.**
+
+#### Available rr Push Tasks
 
 | Task | Command | Description |
 |------|---------|-------------|
 | Normal push | `rr push` | Sync code and push to GitHub |
 | Force push | `rr push-force` | Sync code and force push (`--force-with-lease`) |
 
-### Complete Workflow
+#### Post-Push Sync (REQUIRED)
 
-**1. Push via rr:**
-
-```bash
-# Normal push
-rr push
-
-# Or force push (use sparingly)
-rr push-force
-```
-
-**2. Sync local repo after rr push (REQUIRED):**
-
-After any rr-based push, your local repo is behind `origin/main`. You **must**
-sync your local repo:
+After any rr-based push, your local repo is behind `origin/main` (or the remote branch).
+You **must** sync your local repo to avoid conflicts:
 
 ```bash
-# After normal push:
+# After rr push of main:
 git pull
 
-# After force push (requires clean working tree):
+# After rr push of a branch:
+git fetch origin
+# Optional: check status
+git status
+
+# After rr push-force (requires clean working tree):
 git fetch origin
 git reset --hard origin/main
 ```
