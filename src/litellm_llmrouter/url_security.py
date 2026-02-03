@@ -26,6 +26,9 @@ Configuration (Environment Variables):
   Legacy alias: LLMROUTER_SSRF_ALLOWLIST_CIDRS
 - LLMROUTER_OUTBOUND_URL_ALLOWLIST: Comma-separated URL prefixes that bypass all checks
   (e.g., "http://internal-mcp.local:8080/,https://trusted-api.internal/")
+- LLMROUTER_SSRF_USE_SYNC_DNS: Set to "true" to use synchronous (blocking) DNS resolution.
+  (default: false = non-blocking async DNS). Use as rollback if async DNS causes issues.
+- LLMROUTER_SSRF_DNS_TIMEOUT: Timeout in seconds for async DNS resolution (default: 5.0)
 
 Backwards Compatibility:
 - Old env vars (LLMROUTER_ALLOW_PRIVATE_IPS, LLMROUTER_SSRF_ALLOWLIST_HOSTS,
@@ -34,10 +37,14 @@ Backwards Compatibility:
 Usage:
     from litellm_llmrouter.url_security import validate_outbound_url
 
-    # Raises SSRFBlockedError if URL is dangerous
+    # Sync usage (raises SSRFBlockedError if URL is dangerous)
     validate_outbound_url("https://user-configured-endpoint.com/api")
+
+    # Async usage (non-blocking DNS resolution)
+    await validate_outbound_url_async("https://user-configured-endpoint.com/api")
 """
 
+import asyncio
 import ipaddress
 import os
 import socket
@@ -82,6 +89,9 @@ ALLOWED_SCHEMES = frozenset(["http", "https"])
 # This covers both fd00::/8 (locally assigned) and fc00::/8 (globally assigned)
 IPV6_UNIQUE_LOCAL_NETWORK = ipaddress.ip_network("fc00::/7")
 
+# Default DNS resolution timeout (seconds)
+DEFAULT_DNS_TIMEOUT = 5.0
+
 
 def _get_env_with_fallback(primary: str, fallback: str, default: str = "") -> str:
     """
@@ -117,6 +127,8 @@ def _get_ssrf_config() -> dict:
     - allowlist_hosts: set of allowed host patterns
     - allowlist_cidrs: list of ipaddress.ip_network objects
     - allowlist_urls: list of URL prefixes that bypass checks
+    - use_sync_dns: bool (default: False - use async DNS)
+    - dns_timeout: float (default: 5.0 seconds)
 
     Env vars support legacy names for backwards compatibility.
     """
@@ -167,10 +179,24 @@ def _get_ssrf_config() -> dict:
             # Normalize: ensure trailing slash for prefix matching
             allowlist_urls.append(url_prefix)
 
+    # Rollback flag: use sync DNS resolution (default: False = use async)
+    use_sync_dns_str = os.getenv("LLMROUTER_SSRF_USE_SYNC_DNS", "false")
+    use_sync_dns = use_sync_dns_str.lower() == "true"
+
+    # DNS resolution timeout
+    dns_timeout_str = os.getenv("LLMROUTER_SSRF_DNS_TIMEOUT", str(DEFAULT_DNS_TIMEOUT))
+    try:
+        dns_timeout = float(dns_timeout_str)
+        if dns_timeout <= 0:
+            dns_timeout = DEFAULT_DNS_TIMEOUT
+    except ValueError:
+        dns_timeout = DEFAULT_DNS_TIMEOUT
+
     verbose_proxy_logger.debug(
         f"SSRF config loaded: allow_private_ips={allow_private_ips}, "
         f"allowlist_hosts={allowlist_hosts}, allowlist_cidrs={len(allowlist_cidrs)} networks, "
-        f"allowlist_urls={len(allowlist_urls)} prefixes"
+        f"allowlist_urls={len(allowlist_urls)} prefixes, "
+        f"use_sync_dns={use_sync_dns}, dns_timeout={dns_timeout}s"
     )
 
     return {
@@ -178,6 +204,8 @@ def _get_ssrf_config() -> dict:
         "allowlist_hosts": allowlist_hosts,
         "allowlist_cidrs": allowlist_cidrs,
         "allowlist_urls": allowlist_urls,
+        "use_sync_dns": use_sync_dns,
+        "dns_timeout": dns_timeout,
     }
 
 
@@ -421,6 +449,10 @@ def validate_outbound_url(
     **DENY-BY-DEFAULT**: Private IPs and IPv6 unique-local are blocked unless
     explicitly allowed via configuration.
 
+    **NOTE**: This function uses synchronous DNS resolution by default when
+    LLMROUTER_SSRF_USE_SYNC_DNS=true (rollback mode), which blocks the event loop.
+    For async contexts, use validate_outbound_url_async() instead.
+
     Blocked targets (always, cannot be overridden):
     - Non-http/https schemes (file://, ftp://, etc.)
     - Localhost and loopback addresses (127.0.0.1, ::1)
@@ -495,37 +527,261 @@ def validate_outbound_url(
 
     # Optionally resolve DNS and check resolved IP
     if resolve_dns:
-        try:
-            # Get all IPs for the hostname
-            addr_info = socket.getaddrinfo(
-                hostname, parsed.port or (443 if scheme == "https" else 80)
-            )
-            for family, type_, proto, canonname, sockaddr in addr_info:
-                ip_str = sockaddr[0]
-                blocked, reason = _check_ip_address(ip_str, config)
-                if blocked:
-                    verbose_proxy_logger.warning(
-                        f"SSRF: Blocked URL due to resolved IP {ip_str}: {url}"
-                    )
-                    raise SSRFBlockedError(
-                        url, f"resolved IP {ip_str} is blocked: {reason}"
-                    )
-
-        except socket.gaierror:
-            # DNS resolution failed - let it through, will fail on actual connection
-            verbose_proxy_logger.debug(
-                f"SSRF: DNS resolution failed for {hostname}, allowing"
-            )
-            pass
-        except SSRFBlockedError:
-            raise  # Re-raise SSRF errors
-        except Exception as e:
-            # Other socket errors - log and allow
-            verbose_proxy_logger.debug(f"SSRF: DNS check failed for {hostname}: {e}")
-            pass
+        _resolve_and_check_dns_sync(url, hostname, parsed, scheme, config)
 
     verbose_proxy_logger.debug(f"SSRF: URL validated as safe: {url}")
     return url
+
+
+def _resolve_and_check_dns_sync(
+    url: str, hostname: str, parsed, scheme: str, config: dict
+) -> None:
+    """
+    Resolve DNS synchronously and check all resolved IPs.
+
+    This is the legacy blocking DNS resolution path.
+
+    Args:
+        url: Original URL (for error messages)
+        hostname: Hostname to resolve
+        parsed: Parsed URL object
+        scheme: URL scheme (for default port)
+        config: SSRF configuration dict
+
+    Raises:
+        SSRFBlockedError: If any resolved IP is blocked
+    """
+    try:
+        # Get all IPs for the hostname
+        addr_info = socket.getaddrinfo(
+            hostname, parsed.port or (443 if scheme == "https" else 80)
+        )
+        for family, type_, proto, canonname, sockaddr in addr_info:
+            ip_str = sockaddr[0]
+            blocked, reason = _check_ip_address(ip_str, config)
+            if blocked:
+                verbose_proxy_logger.warning(
+                    f"SSRF: Blocked URL due to resolved IP {ip_str}: {url}"
+                )
+                raise SSRFBlockedError(
+                    url, f"resolved IP {ip_str} is blocked: {reason}"
+                )
+
+    except socket.gaierror:
+        # DNS resolution failed - let it through, will fail on actual connection
+        verbose_proxy_logger.debug(
+            f"SSRF: DNS resolution failed for {hostname}, allowing"
+        )
+        pass
+    except SSRFBlockedError:
+        raise  # Re-raise SSRF errors
+    except Exception as e:
+        # Other socket errors - log and allow
+        verbose_proxy_logger.debug(f"SSRF: DNS check failed for {hostname}: {e}")
+        pass
+
+
+async def _resolve_dns_async(
+    hostname: str, port: int, timeout: float
+) -> list[tuple[int, int, int, str, tuple]]:
+    """
+    Resolve DNS asynchronously without blocking the event loop.
+
+    Uses asyncio.get_running_loop().getaddrinfo() for non-blocking resolution.
+
+    Args:
+        hostname: Hostname to resolve
+        port: Port number for resolution context
+        timeout: Timeout in seconds
+
+    Returns:
+        List of address info tuples from getaddrinfo
+
+    Raises:
+        asyncio.TimeoutError: If resolution exceeds timeout
+        socket.gaierror: If DNS resolution fails
+    """
+    loop = asyncio.get_running_loop()
+    return await asyncio.wait_for(
+        loop.getaddrinfo(hostname, port, family=0, type=socket.SOCK_STREAM),
+        timeout=timeout,
+    )
+
+
+async def validate_outbound_url_async(
+    url: str,
+    resolve_dns: bool = True,
+    allow_private_ips: bool | None = None,
+) -> str:
+    """
+    Validate a URL for safe outbound HTTP requests (async version).
+
+    This function is the async-safe version of validate_outbound_url() that
+    does NOT block the event loop during DNS resolution. It uses
+    asyncio.get_running_loop().getaddrinfo() for non-blocking DNS lookups.
+
+    **DENY-BY-DEFAULT**: Private IPs and IPv6 unique-local are blocked unless
+    explicitly allowed via configuration.
+
+    Blocked targets (always, cannot be overridden):
+    - Non-http/https schemes (file://, ftp://, etc.)
+    - Localhost and loopback addresses (127.0.0.1, ::1)
+    - Link-local addresses including cloud metadata (169.254.0.0/16, fe80::/10)
+    - Hostnames like "localhost", "metadata.google.internal"
+
+    Blocked by default (can be allowed via config):
+    - Private network IPs (10.x.x.x, 172.16-31.x.x, 192.168.x.x)
+    - IPv6 unique-local addresses (fc00::/7)
+
+    Configuration:
+    - LLMROUTER_SSRF_DNS_TIMEOUT: Timeout in seconds for DNS resolution (default: 5.0)
+    - LLMROUTER_SSRF_USE_SYNC_DNS: If "true", falls back to sync resolution (default: false)
+
+    Args:
+        url: The URL to validate
+        resolve_dns: If True, resolve hostname to IP and check the IP too
+        allow_private_ips: Override env var; if True, allow RFC1918/ULA IPs for this call
+
+    Returns:
+        The original URL if validation passes
+
+    Raises:
+        SSRFBlockedError: If the URL is blocked due to SSRF risk
+        ValueError: If the URL is malformed
+    """
+    if not url:
+        raise ValueError("URL cannot be empty")
+
+    # Load configuration
+    config = _get_ssrf_config()
+
+    # If rollback flag is set, use synchronous resolution
+    if config.get("use_sync_dns", False):
+        verbose_proxy_logger.debug(
+            "SSRF: Using sync DNS resolution (rollback mode enabled)"
+        )
+        return validate_outbound_url(url, resolve_dns, allow_private_ips)
+
+    # Check URL allowlist first - bypasses all other checks
+    if _is_url_allowlisted(url, config):
+        verbose_proxy_logger.debug(f"SSRF: URL '{url}' allowed by URL prefix allowlist")
+        return url
+
+    # Apply per-call override if provided
+    if allow_private_ips is not None:
+        config = dict(config)  # Create a copy to avoid modifying cached config
+        config["allow_private_ips"] = allow_private_ips
+
+    # Parse URL
+    try:
+        parsed = urlparse(url)
+    except Exception as e:
+        raise ValueError(f"Invalid URL format: {e}") from e
+
+    # Check scheme
+    scheme = (parsed.scheme or "").lower()
+    if scheme not in ALLOWED_SCHEMES:
+        raise SSRFBlockedError(
+            url, f"scheme '{scheme}' not allowed; only http/https permitted"
+        )
+
+    # Get hostname
+    hostname = parsed.hostname
+    if not hostname:
+        raise ValueError("URL must have a hostname")
+
+    # Check blocked hostnames (considers allowlist)
+    blocked, reason = _check_hostname(hostname, config)
+    if blocked:
+        verbose_proxy_logger.warning(f"SSRF: Blocked URL due to hostname: {url}")
+        raise SSRFBlockedError(url, reason)
+
+    # Check if hostname is an IP address directly
+    blocked, reason = _check_ip_address(hostname, config)
+    if blocked:
+        verbose_proxy_logger.warning(f"SSRF: Blocked URL due to IP address: {url}")
+        raise SSRFBlockedError(url, reason)
+
+    # Optionally resolve DNS and check resolved IP (async)
+    if resolve_dns:
+        await _resolve_and_check_dns_async(url, hostname, parsed, scheme, config)
+
+    verbose_proxy_logger.debug(f"SSRF: URL validated as safe: {url}")
+    return url
+
+
+async def _resolve_and_check_dns_async(
+    url: str, hostname: str, parsed, scheme: str, config: dict
+) -> None:
+    """
+    Resolve DNS asynchronously and check all resolved IPs.
+
+    This is the non-blocking DNS resolution path that doesn't block the event loop.
+
+    Args:
+        url: Original URL (for error messages)
+        hostname: Hostname to resolve
+        parsed: Parsed URL object
+        scheme: URL scheme (for default port)
+        config: SSRF configuration dict
+
+    Raises:
+        SSRFBlockedError: If any resolved IP is blocked
+    """
+    dns_timeout = config.get("dns_timeout", DEFAULT_DNS_TIMEOUT)
+    port = parsed.port or (443 if scheme == "https" else 80)
+
+    try:
+        # Get all IPs for the hostname asynchronously
+        addr_info = await _resolve_dns_async(hostname, port, dns_timeout)
+
+        for family, type_, proto, canonname, sockaddr in addr_info:
+            ip_str = sockaddr[0]
+            blocked, reason = _check_ip_address(ip_str, config)
+            if blocked:
+                verbose_proxy_logger.warning(
+                    f"SSRF: Blocked URL due to resolved IP {ip_str}: {url}"
+                )
+                raise SSRFBlockedError(
+                    url, f"resolved IP {ip_str} is blocked: {reason}"
+                )
+
+    except asyncio.TimeoutError:
+        # DNS resolution timed out - log and allow (will fail on actual connection)
+        verbose_proxy_logger.warning(
+            f"SSRF: Async DNS resolution timed out for {hostname} after {dns_timeout}s, allowing"
+        )
+        pass
+    except socket.gaierror:
+        # DNS resolution failed - let it through, will fail on actual connection
+        verbose_proxy_logger.debug(
+            f"SSRF: DNS resolution failed for {hostname}, allowing"
+        )
+        pass
+    except SSRFBlockedError:
+        raise  # Re-raise SSRF errors
+    except Exception as e:
+        # Other errors - log and allow
+        verbose_proxy_logger.debug(f"SSRF: Async DNS check failed for {hostname}: {e}")
+        pass
+
+
+async def is_url_safe_async(url: str, resolve_dns: bool = True) -> bool:
+    """
+    Check if a URL is safe for outbound requests without raising exceptions (async version).
+
+    Args:
+        url: The URL to check
+        resolve_dns: If True, also resolve and check the IP
+
+    Returns:
+        True if URL is safe, False otherwise
+    """
+    try:
+        await validate_outbound_url_async(url, resolve_dns=resolve_dns)
+        return True
+    except (SSRFBlockedError, ValueError):
+        return False
 
 
 def is_url_safe(url: str, resolve_dns: bool = True) -> bool:
