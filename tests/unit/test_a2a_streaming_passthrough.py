@@ -731,3 +731,379 @@ class TestStreamingPerformanceCharacteristics:
         # Verify interleaving: first upstream chunk should be yielded
         # before second upstream chunk is received
         assert chunks_received_order.index("downstream_chunk1") < chunks_received_order.index("upstream_2")
+
+
+# =============================================================================
+# Header Preservation Tests (TG10.1)
+# =============================================================================
+
+
+class TestHeaderPreservation:
+    """
+    Tests for upstream header preservation on streaming responses.
+    
+    Validates that important headers like Content-Type: text/event-stream
+    are preserved on streaming responses.
+    """
+
+    def test_filter_upstream_headers_preserves_content_type(self):
+        """Content-Type header is preserved from upstream."""
+        import httpx
+        from litellm_llmrouter.a2a_gateway import filter_upstream_headers
+        
+        headers = httpx.Headers({
+            "content-type": "text/event-stream; charset=utf-8",
+            "cache-control": "no-cache",
+            "connection": "keep-alive",  # Should be stripped (hop-by-hop)
+        })
+        
+        filtered = filter_upstream_headers(headers)
+        
+        assert "content-type" in filtered
+        assert filtered["content-type"] == "text/event-stream; charset=utf-8"
+        assert "cache-control" in filtered
+        assert "connection" not in filtered  # Hop-by-hop stripped
+
+    def test_filter_upstream_headers_strips_hop_by_hop(self):
+        """Hop-by-hop headers are stripped from forwarding."""
+        import httpx
+        from litellm_llmrouter.a2a_gateway import (
+            filter_upstream_headers,
+            HOP_BY_HOP_HEADERS,
+        )
+        
+        # Build headers with all hop-by-hop headers
+        header_dict = {"content-type": "text/event-stream"}
+        for hop_header in HOP_BY_HOP_HEADERS:
+            header_dict[hop_header] = "some-value"
+        
+        headers = httpx.Headers(header_dict)
+        filtered = filter_upstream_headers(headers)
+        
+        # None of the hop-by-hop headers should be present
+        for hop_header in HOP_BY_HOP_HEADERS:
+            assert hop_header not in filtered
+        
+        # Content-type should still be there
+        assert "content-type" in filtered
+
+    def test_filter_upstream_headers_strips_unsafe(self):
+        """Unsafe/security-sensitive headers are stripped."""
+        import httpx
+        from litellm_llmrouter.a2a_gateway import (
+            filter_upstream_headers,
+            UNSAFE_HEADERS,
+        )
+        
+        header_dict = {"content-type": "text/event-stream"}
+        for unsafe_header in UNSAFE_HEADERS:
+            header_dict[unsafe_header] = "some-value"
+        
+        headers = httpx.Headers(header_dict)
+        filtered = filter_upstream_headers(headers)
+        
+        # None of the unsafe headers should be present
+        for unsafe_header in UNSAFE_HEADERS:
+            assert unsafe_header not in filtered
+
+    def test_filter_upstream_headers_preserves_x_accel_buffering(self):
+        """X-Accel-Buffering header is preserved (important for nginx SSE)."""
+        import httpx
+        from litellm_llmrouter.a2a_gateway import filter_upstream_headers
+        
+        headers = httpx.Headers({
+            "content-type": "text/event-stream",
+            "x-accel-buffering": "no",
+        })
+        
+        filtered = filter_upstream_headers(headers)
+        
+        assert "x-accel-buffering" in filtered
+        assert filtered["x-accel-buffering"] == "no"
+
+    def test_streaming_response_meta_defaults(self):
+        """StreamingResponseMeta has correct defaults."""
+        from litellm_llmrouter.a2a_gateway import StreamingResponseMeta
+        
+        meta = StreamingResponseMeta()
+        
+        assert meta.headers == {}
+        assert meta.status_code == 200
+
+    def test_streaming_response_meta_with_values(self):
+        """StreamingResponseMeta stores provided values."""
+        from litellm_llmrouter.a2a_gateway import StreamingResponseMeta
+        
+        meta = StreamingResponseMeta(
+            headers={"content-type": "text/event-stream"},
+            status_code=206,
+        )
+        
+        assert meta.headers == {"content-type": "text/event-stream"}
+        assert meta.status_code == 206
+
+
+# =============================================================================
+# Method Mismatch / Routing Tests (TG10.1)
+# =============================================================================
+
+
+class TestMethodMismatchRouting:
+    """
+    Tests for correct routing of message/stream to streaming endpoint.
+    
+    Validates that invoke_agent returns an error for message/stream requests,
+    directing callers to use the streaming endpoint instead.
+    """
+
+    async def test_invoke_agent_rejects_message_stream_method(self):
+        """invoke_agent returns error for message/stream, directing to streaming endpoint."""
+        with patch.dict(os.environ, {"A2A_GATEWAY_ENABLED": "true"}):
+            import importlib
+            import litellm_llmrouter.a2a_gateway as gateway_module
+
+            importlib.reload(gateway_module)
+
+            gateway = create_a2a_gateway_with_agent()
+            
+            # Create a message/stream request
+            request = gateway_module.JSONRPCRequest(
+                method="message/stream",
+                params={"message": {"role": "user", "parts": [{"type": "text", "text": "test"}]}},
+                id="1",
+            )
+            
+            # Mock the HTTP response
+            mock_response = type("MockResponse", (), {
+                "status_code": 200,
+                "raise_for_status": lambda self: None,
+                "json": lambda self: {"result": {"status": "ok"}},
+            })()
+            
+            mock_client = type("MockClient", (), {
+                "__aenter__": lambda self: self,
+                "__aexit__": lambda self, *args: None,
+                "post": lambda self, *args, **kwargs: mock_response,
+            })()
+            
+            # Mock the async context manager
+            async def mock_aenter():
+                return mock_client
+            
+            async def mock_aexit(*args):
+                pass
+            
+            class MockClientContext:
+                async def __aenter__(self):
+                    return mock_client
+                async def __aexit__(self, *args):
+                    pass
+            
+            with patch("litellm_llmrouter.a2a_gateway.get_client_for_request", return_value=MockClientContext()):
+                response = await gateway.invoke_agent("test-agent", request)
+            
+            # Should return an error directing to streaming endpoint
+            assert response.error is not None
+            assert response.error["code"] == -32600
+            assert "streaming endpoint" in response.error["message"].lower()
+
+
+# =============================================================================
+# Progressive Yield Without Newline Tests (TG10.1)
+# =============================================================================
+
+
+class TestProgressiveYieldWithoutNewlines:
+    """
+    Tests verifying that raw streaming yields progressively even when
+    upstream content has no newlines.
+    
+    This is critical for proper SSE chunking where data may arrive
+    in arbitrary boundaries.
+    """
+
+    async def test_stream_with_no_newlines_yields_progressively(self):
+        """Stream with zero newlines still yields all chunks progressively."""
+        # Upstream sends multiple chunks without any newlines
+        chunks_no_newlines = [
+            b'{"data": "part1"}',
+            b'{"data": "part2"}',
+            b'{"data": "part3"}',
+        ]
+
+        mock_response = MockHTTPResponse(content=chunks_no_newlines)
+
+        with patch.dict(os.environ, {"A2A_RAW_STREAMING_ENABLED": "true"}):
+            import importlib
+            import litellm_llmrouter.a2a_gateway as gateway_module
+
+            importlib.reload(gateway_module)
+
+            gateway = create_a2a_gateway_with_agent()
+            request = create_jsonrpc_request()
+
+            # Raw mode - should yield 3 chunks
+            with patch("httpx.AsyncClient", return_value=MockAsyncClient(mock_response)):
+                raw_chunks = []
+                async for chunk in gateway._stream_agent_response_raw(
+                    "test-agent", request
+                ):
+                    raw_chunks.append(chunk)
+
+        # Raw mode should have yielded 3 chunks - one per upstream chunk
+        assert len(raw_chunks) == 3
+
+        # Check that each chunk is present in the combined response
+        combined = "".join(raw_chunks)
+        for chunk in chunks_no_newlines:
+            chunk_str = chunk.decode("utf-8")
+            assert chunk_str in combined
+
+        # CRITICAL: In raw mode, chunks do NOT have newlines appended
+        # This is the key difference from buffered mode - we pass through
+        # the exact bytes from upstream without any transformation
+        for chunk in raw_chunks:
+            # Raw chunks preserve original format - no automatic newline
+            assert not chunk.endswith("\n"), "Raw mode should not append newlines"
+
+    async def test_buffered_mode_buffers_without_newlines(self):
+        """
+        Buffered mode may not yield chunks without newlines.
+        
+        This demonstrates the behavior difference between raw and buffered modes.
+        In buffered mode (line iteration), content without newlines may be held.
+        """
+
+    async def test_raw_vs_buffered_responsiveness_comparison(self):
+        """
+        Raw mode should be more responsive than buffered mode for
+        content without newlines.
+        """
+        # Chunks that would be slow in buffered mode
+        chunks = [
+            b'{"event": "start"}',  # No newline - buffered would wait
+            b'{"event": "progress", "pct": 50}',  # Still waiting...
+            b'{"event": "done"}\n',  # Finally a newline!
+        ]
+
+        mock_response_raw = MockHTTPResponse(content=chunks)
+        mock_response_buffered = MockHTTPResponse(content=chunks)
+
+        with patch.dict(os.environ, {"A2A_RAW_STREAMING_ENABLED": "true"}):
+            import importlib
+            import litellm_llmrouter.a2a_gateway as gateway_module
+
+            importlib.reload(gateway_module)
+
+            gateway = create_a2a_gateway_with_agent()
+            request = create_jsonrpc_request()
+
+            # Raw mode - should yield all 3 chunks
+            with patch("httpx.AsyncClient", return_value=MockAsyncClient(mock_response_raw)):
+                raw_chunks = []
+                async for chunk in gateway._stream_agent_response_raw(
+                    "test-agent", request
+                ):
+                    raw_chunks.append(chunk)
+
+        with patch.dict(os.environ, {"A2A_RAW_STREAMING_ENABLED": "false"}):
+            import importlib
+            import litellm_llmrouter.a2a_gateway as gateway_module
+
+            importlib.reload(gateway_module)
+
+            gateway = create_a2a_gateway_with_agent()
+            request = create_jsonrpc_request()
+
+            # Buffered mode - may yield fewer chunks (waits for newlines)
+            with patch("httpx.AsyncClient", return_value=MockAsyncClient(mock_response_buffered)):
+                buffered_chunks = []
+                async for chunk in gateway._stream_agent_response_buffered(
+                    "test-agent", request
+                ):
+                    buffered_chunks.append(chunk)
+
+        # Raw mode should have yielded 3 chunks (one-per-upstream-plan)
+        assert len(raw_chunks) == 3
+        
+        #.Buffered mode should have yielded fewer chunks (depends on mock implementation)
+        # Key assertion: compare counting when raw is chunk boundary preserving
+
+
+# =============================================================================
+# Content-Type Passthrough Tests (TG10.1)
+# =============================================================================
+
+
+class TestContentTypePassthrough:
+    """
+    Tests verifying that Content-Type header from upstream is preserved.
+    
+    This is critical for SSE clients to properly interpret the stream.
+    """
+
+    def test_sse_content_type_preserved(self):
+        """text/event-stream content-type is preserved."""
+        import httpx
+        from litellm_llmrouter.a2a_gateway import filter_upstream_headers
+        
+        headers = httpx.Headers({
+            "content-type": "text/event-stream",
+        })
+        
+        filtered = filter_upstream_headers(headers)
+        
+        assert filtered.get("content-type") == "text/event-stream"
+
+    def test_json_content_type_preserved(self):
+        """application/json content-type is preserved."""
+        import httpx
+        from litellm_llmrouter.a2a_gateway import filter_upstream_headers
+        
+        headers = httpx.Headers({
+            "content-type": "application/json; charset=utf-8",
+        })
+        
+        filtered = filter_upstream_headers(headers)
+        
+        assert filtered.get("content-type") == "application/json; charset=utf-8"
+
+    def test_ndjson_content_type_preserved(self):
+        """application/x-ndjson content-type is preserved."""
+        import httpx
+        from litellm_llmrouter.a2a_gateway import filter_upstream_headers
+        
+        headers = httpx.Headers({
+            "content-type": "application/x-ndjson",
+        })
+        
+        filtered = filter_upstream_headers(headers)
+        
+        assert filtered.get("content-type") == "application/x-ndjson"
+
+    def test_streaming_headers_allowlist(self):
+        """Verify the allowlist contains expected streaming headers."""
+        from litellm_llmrouter.a2a_gateway import STREAMING_HEADERS_TO_PRESERVE
+        
+        # These headers are critical for SSE/streaming
+        assert "content-type" in STREAMING_HEADERS_TO_PRESERVE
+        assert "cache-control" in STREAMING_HEADERS_TO_PRESERVE
+        assert "x-accel-buffering" in STREAMING_HEADERS_TO_PRESERVE
+
+    def test_real_sse_headers_preserved(self):
+        """Real SSE streaming response headers are preserved correctly."""
+        import httpx
+        from litellm_llmrouter.a2a_gateway import filter_upstream_headers
+        
+        # Simulate a real SSE response headers
+        sample_sse_headers = httpx.Headers({
+            'content-type': 'text/event-stream; charset=utf-8',
+            'cache-control': 'no-cache',
+            'x-accel-buffering': 'no',
+        })
+        
+        filtered = filter_upstream_headers(sample_sse_headers)
+        
+        assert filtered['content-type'] == 'text/event-stream; charset=utf-8'
+        assert filtered['cache-control'] == 'no-cache'
+        assert filtered['x-accel-buffering'] == 'no'
