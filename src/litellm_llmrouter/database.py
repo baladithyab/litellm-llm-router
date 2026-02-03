@@ -10,6 +10,7 @@ Database Schema:
 - mcp_servers: Stores MCP server registrations
 - mcp_tools: Stores MCP tool definitions
 - mcp_resources: Stores MCP resource definitions
+- audit_logs: Stores control-plane audit logs
 """
 
 import os
@@ -373,9 +374,16 @@ async def run_migrations() -> None:
         conn = await asyncpg.connect(db_url)
         try:
             await conn.execute(A2A_AGENTS_TABLE_SQL)
+            await conn.execute(A2A_ACTIVITY_TABLE_SQL)
+            await conn.execute(MCP_SERVERS_TABLE_SQL)
             verbose_proxy_logger.info("A2A DB: Migrations completed successfully")
         finally:
             await conn.close()
+        
+        # Run audit log migrations
+        from .audit import run_audit_migrations
+        await run_audit_migrations()
+        
     except ImportError:
         verbose_proxy_logger.warning("asyncpg not installed, skipping migrations")
     except Exception as e:

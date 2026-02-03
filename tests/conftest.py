@@ -38,6 +38,7 @@ def pytest_collection_modifyitems(config, items):
         "test_resilience",  # TG2.3 - circuit breaker tests (no external deps)
         "test_quota_enforcement",  # TG3.1 - manages its own compose stack
         "test_rbac_enforcement",  # TG3.2 - uses in-process TestClient (no external deps)
+        "test_audit_logging",  # TG3.3 - uses mocks for degraded mode tests
     }
 
     if not gateway_available:
