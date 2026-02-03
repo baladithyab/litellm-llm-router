@@ -61,6 +61,7 @@ from .mcp_gateway import MCPServer, MCPTransport, MCPToolDefinition, get_mcp_gat
 from .hot_reload import get_hot_reload_manager
 from .config_sync import get_sync_manager
 from .url_security import validate_outbound_url, SSRFBlockedError
+from .resilience import get_drain_manager
 
 # Import MCP parity layer routers and feature flags
 from .mcp_parity import (
@@ -207,14 +208,29 @@ async def readiness_probe():
 
     If a dependency is not configured, it's not checked (still returns ready).
     If a dependency is configured but unreachable, returns 503.
+    If the server is draining (graceful shutdown), returns 503.
 
     Returns:
-        200 OK if all configured dependencies are healthy
-        503 Service Unavailable if any configured dependency is unhealthy
+        200 OK if all configured dependencies are healthy and not draining
+        503 Service Unavailable if any configured dependency is unhealthy or draining
     """
     request_id = get_request_id() or "unknown"
     checks = {}
     is_ready = True
+
+    # Check drain status first (highest priority)
+    drain_manager = get_drain_manager()
+    if drain_manager.is_draining:
+        checks["drain_status"] = {
+            "status": "draining",
+            "active_requests": drain_manager.active_requests,
+        }
+        is_ready = False
+    else:
+        checks["drain_status"] = {
+            "status": "accepting",
+            "active_requests": drain_manager.active_requests,
+        }
 
     # Check database if configured
     db_url = os.getenv("DATABASE_URL")

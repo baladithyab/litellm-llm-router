@@ -8,10 +8,11 @@ It explicitly configures all middleware, routers, and patches in a single place.
 Load Order:
 1. Apply LiteLLM router patch (if enabled)
 2. Get/create FastAPI app
-3. Add middleware
+3. Add middleware (including backpressure/resilience)
 4. Load and register plugins (deterministically before routes)
 5. Register built-in routes
 6. Set up plugin lifecycle hooks
+7. Set up graceful shutdown hooks
 
 Usage with LiteLLM proxy (in-process):
     from litellm_llmrouter.gateway import create_app
@@ -33,6 +34,11 @@ from typing import AsyncGenerator
 from fastapi import FastAPI
 
 from ..routing_strategy_patch import is_patch_applied, patch_litellm_router
+from ..resilience import (
+    add_backpressure_middleware,
+    get_drain_manager,
+    graceful_shutdown,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -223,6 +229,7 @@ def create_app(
     apply_patch: bool = True,
     include_admin_routes: bool = True,
     enable_plugins: bool = True,
+    enable_resilience: bool = True,
 ) -> FastAPI:
     """
     Configure the LiteLLM proxy's FastAPI app with LLMRouter extensions.
@@ -234,6 +241,7 @@ def create_app(
     4. Loads plugins (discovery + validation, before routes)
     5. Registers LLMRouter routes (health, llmrouter, admin)
     6. Sets up plugin lifecycle hooks (startup runs later)
+    7. Adds backpressure middleware and drain manager (if enabled)
 
     This is the preferred method for in-process LiteLLM proxy usage.
 
@@ -241,6 +249,7 @@ def create_app(
         apply_patch: Whether to apply the LiteLLM router patch (default: True)
         include_admin_routes: Whether to include admin routes (default: True)
         enable_plugins: Whether to enable plugin lifecycle (default: True)
+        enable_resilience: Whether to enable backpressure/drain middleware (default: True)
 
     Returns:
         The configured FastAPI application instance
@@ -294,6 +303,13 @@ def create_app(
         app.state.llmrouter_plugin_startup = lambda: _run_plugin_startup(app)
         app.state.llmrouter_plugin_shutdown = lambda: _run_plugin_shutdown(app)
 
+    # Step 7: Add backpressure middleware (wraps ASGI app)
+    if enable_resilience:
+        add_backpressure_middleware(app)
+        # Store graceful shutdown function for external use
+        app.state.graceful_shutdown = lambda timeout=None: graceful_shutdown(app, timeout)
+        logger.debug("Resilience middleware and drain manager attached")
+
     logger.info("Gateway app created and configured")
     return app
 
@@ -304,6 +320,7 @@ def create_standalone_app(
     version: str = "0.1.1",
     include_admin_routes: bool = True,
     enable_plugins: bool = True,
+    enable_resilience: bool = True,
 ) -> FastAPI:
     """
     Create a standalone FastAPI app with just LLMRouter routes.
@@ -319,6 +336,7 @@ def create_standalone_app(
         version: FastAPI app version
         include_admin_routes: Whether to include admin routes (default: True)
         enable_plugins: Whether to enable plugin lifecycle (default: True)
+        enable_resilience: Whether to enable backpressure/drain middleware (default: True)
 
     Returns:
         A new standalone FastAPI application instance
@@ -338,6 +356,11 @@ def create_standalone_app(
         try:
             yield
         finally:
+            # Graceful shutdown with drain
+            if enable_resilience:
+                drain_manager = get_drain_manager()
+                await drain_manager.start_drain()
+                await drain_manager.wait_for_drain()
             if enable_plugins:
                 await _run_plugin_shutdown(app)
 
@@ -352,6 +375,12 @@ def create_standalone_app(
 
     # Register routes
     _register_routes(app, include_admin=include_admin_routes)
+
+    # Add backpressure middleware (wraps ASGI app)
+    if enable_resilience:
+        add_backpressure_middleware(app)
+        app.state.graceful_shutdown = lambda timeout=None: graceful_shutdown(app, timeout)
+        logger.debug("Resilience middleware and drain manager attached")
 
     logger.info("Standalone gateway app created")
     return app
