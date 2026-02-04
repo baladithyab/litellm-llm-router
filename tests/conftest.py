@@ -40,6 +40,7 @@ def pytest_collection_modifyitems(config, items):
         "test_rbac_enforcement",  # TG3.2 - uses in-process TestClient (no external deps)
         "test_audit_logging",  # TG3.3 - uses mocks for degraded mode tests
         "test_otel_e2e",  # TG4.2 - manages its own compose stack (OTel E2E validation)
+        "test_policy_enforcement",  # TG5.2 - uses in-process TestClient (no external deps)
     }
 
     if not gateway_available:

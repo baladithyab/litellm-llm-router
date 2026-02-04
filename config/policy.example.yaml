@@ -1,0 +1,107 @@
+# RouteIQ Policy Engine Configuration Example
+# =============================================
+#
+# This file defines OPA-style policy rules for request authorization.
+# Rules are evaluated in priority order (lower = evaluated first).
+# First matching rule wins.
+#
+# Environment Variables:
+#   POLICY_ENGINE_ENABLED: true/false (default: false)
+#   POLICY_ENGINE_FAIL_MODE: open/closed (default: open)
+#   POLICY_CONFIG_PATH: path to this file
+#
+# Example usage:
+#   export POLICY_ENGINE_ENABLED=true
+#   export POLICY_CONFIG_PATH=config/policy.yaml
+
+# Default action when no rule matches
+default_action: allow
+default_reason: "No matching policy rule"
+
+# Paths excluded from policy evaluation (always allowed)
+excluded_paths:
+  - "/_health/live"
+  - "/_health/ready"
+  - "/health/liveliness"
+  - "/health/readiness"
+  - "/health"
+
+# Policy rules - evaluated in priority order
+rules:
+  # High-priority admin rules
+  - name: admin_team_full_access
+    priority: 10
+    action: allow
+    teams:
+      - "admin-team"
+      - "platform-team"
+    reason: "Admin team has full access"
+
+  # Deny access to expensive models for non-premium teams
+  - name: deny_expensive_models
+    priority: 50
+    action: deny
+    models:
+      - "gpt-4*"
+      - "claude-3-opus*"
+      - "claude-4*"
+    teams:
+      - "free-tier"
+      - "trial-*"
+    reason: "Premium model access denied for free-tier teams"
+
+  # Route-based restrictions
+  - name: deny_admin_routes_to_users
+    priority: 60
+    action: deny
+    routes:
+      - "/llmrouter/*"
+      - "/config/*"
+      - "/admin/*"
+    api_keys:
+      - "sk-user-*"
+    reason: "User API keys cannot access admin routes"
+
+  # IP-based restrictions
+  - name: allow_internal_network
+    priority: 70
+    action: allow
+    source_ips:
+      - "10.0.0.0/8"
+      - "172.16.0.0/12"
+      - "192.168.0.0/16"
+    reason: "Internal network access allowed"
+
+  # Method-based restrictions
+  - name: read_only_for_readonly_keys
+    priority: 80
+    action: deny
+    api_keys:
+      - "sk-readonly-*"
+    methods:
+      - "POST"
+      - "PUT"
+      - "DELETE"
+      - "PATCH"
+    reason: "Read-only API keys cannot perform write operations"
+
+  # Model usage restrictions
+  - name: team_model_allowlist
+    priority: 90
+    action: allow
+    teams:
+      - "team-data-science"
+    models:
+      - "gpt-3.5-turbo*"
+      - "claude-3-haiku*"
+    reason: "Data science team approved for specified models"
+
+  # Default allow for authenticated users on LLM routes
+  - name: allow_authenticated_llm
+    priority: 100
+    action: allow
+    routes:
+      - "/v1/chat/completions"
+      - "/v1/completions"
+      - "/v1/embeddings"
+    reason: "Authenticated access to LLM routes allowed"

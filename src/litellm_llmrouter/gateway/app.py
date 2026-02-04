@@ -44,6 +44,7 @@ from ..http_client_pool import (
     startup_http_client_pool,
     shutdown_http_client_pool,
 )
+from ..policy_engine import add_policy_middleware, get_policy_engine
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +74,11 @@ def _configure_middleware(app: FastAPI) -> None:
     Configure all middleware for the application.
 
     Middleware is added in order (first added = outermost).
+    
+    Load order:
+    1. RequestIDMiddleware - Request correlation (outermost)
+    2. PolicyMiddleware - OPA-style policy enforcement (ASGI level)
+    3. RouterDecisionMiddleware - Telemetry for routing decisions
 
     Args:
         app: The FastAPI application instance
@@ -83,6 +89,12 @@ def _configure_middleware(app: FastAPI) -> None:
     # Request ID middleware - should be outermost for correlation
     app.add_middleware(RequestIDMiddleware)
     logger.debug("Added RequestIDMiddleware")
+    
+    # Policy middleware - OPA-style enforcement at ASGI layer
+    # This runs BEFORE routing and FastAPI authentication
+    # Enables denial before streaming begins, no response buffering
+    if add_policy_middleware(app):
+        logger.info("Added PolicyMiddleware (policy enforcement enabled)")
     
     # Router decision telemetry middleware - emits TG4.1 router.* span attributes
     if register_router_decision_middleware(app):
