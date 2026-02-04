@@ -1,10 +1,12 @@
 # Resume Checkpoint: TG Backlog & Workflow
 
-**Date:** 2026-02-03
-**HEAD:** `6ac6e240df210aa15958200a1a84ffbcdbb67242`
+**Date:** 2026-02-04
+**HEAD:** *(updated on squash merge to main)*
 **Context:** Resume point for ongoing Task Groups (TGs) and validation workflows.
 
 ## Recent Changes
+- **TG3 Family (Tenant Controls):** Completed quotas, RBAC, and audit logging implementation.
+- **Epic Plans:** Queued TG4–TG9 with detailed sub-TG breakdowns and acceptance criteria.
 - **Docs:** Updated `AGENTS.md` with `rr` push workflow and post-push sync instructions.
 - **Tooling:** Integrated `rr` (Road Runner) for remote git operations.
 - **Streaming:** Added performance gate for TTFB and chunk cadence (`test_streaming_perf_gate.py`).
@@ -62,15 +64,37 @@ git reset --hard origin/main
 | TG | Goal | Status | Key Files | Next Acceptance Criteria |
 |----|------|--------|-----------|--------------------------|
 | **TG2.3** | **Streaming Performance** | **Pending** | [`tests/integration/test_streaming_perf_gate.py`](../tests/integration/test_streaming_perf_gate.py) <br> [`docker-compose.streaming-perf.yml`](../docker-compose.streaming-perf.yml) | Pass TTFB < 50ms and variance < 10% in CI environment. |
-| **TG3** | **High Availability** | **Pending** | [`tests/integration/test_ha_leader_failover.py`](../tests/integration/test_ha_leader_failover.py) | Reliable leader election recovery under 5s during chaos testing. |
-| **TG4** | **MCP SSE Transport** | **Validating** | [`src/litellm_llmrouter/mcp_sse_transport.py`](../src/litellm_llmrouter/mcp_sse_transport.py) <br> [`scripts/validate_mcp_sse.py`](../scripts/validate_mcp_sse.py) | Full pass of `validate_mcp_sse.py` with concurrent clients. |
-| **TG5** | **Security Hardening** | **In Progress** | [`src/litellm_llmrouter/auth.py`](../src/litellm_llmrouter/auth.py) <br> [`src/litellm_llmrouter/url_security.py`](../src/litellm_llmrouter/url_security.py) | Audit log export to S3 verified (P1-04). |
-| **TG9** | **Docker E2E** | **Done** | [`plans/tg10-6-e2e-verification-report.md`](tg10-6-e2e-verification-report.md) | Finalize gap closure report (Gate 10). |
+| **TG3** | **Tenant Controls (Quotas/RBAC/Audit)** | **✅ Done** | [`src/litellm_llmrouter/quota.py`](../src/litellm_llmrouter/quota.py) <br> [`src/litellm_llmrouter/rbac.py`](../src/litellm_llmrouter/rbac.py) <br> [`src/litellm_llmrouter/audit.py`](../src/litellm_llmrouter/audit.py) | Completed: Quota enforcement, RBAC policies, audit logging. |
+| **TG9 (Legacy)** | **Docker E2E** | **✅ Done** | [`plans/tg10-6-e2e-verification-report.md`](tg10-6-e2e-verification-report.md) | Finalized gap closure report (Gate 10). |
 
 ---
 
-## 4. Next Priorities
+## 4. Queued Epic Orchestrations (TG4–TG9)
 
-1. **Complete TG2.3 (Streaming):** Tune performance gate thresholds and ensure stability.
-2. **Finalize TG4 (MCP SSE):** Ensure SSE transport is robust and matches JSON-RPC parity.
-3. **Advance TG3 (HA):** Hardening of Redis-based leader election.
+These epics are queued for implementation. Each contains sub-TG breakdowns, acceptance criteria, and validation commands.
+
+| Epic | Goal | Epic Plan | Priority |
+|------|------|-----------|----------|
+| **TG4** | **Observability** | [tg4-observability-epic.md](tg4-observability-epic.md) | High |
+| **TG5** | **Security Policy** | [tg5-security-policy-epic.md](tg5-security-policy-epic.md) | High |
+| **TG6** | **CI Quality Gates** | [tg6-ci-quality-gates-epic.md](tg6-ci-quality-gates-epic.md) | Medium |
+| **TG7** | **Cloud-Native Deployment** | [tg7-cloud-native-deploy-epic.md](tg7-cloud-native-deploy-epic.md) | Medium |
+| **TG8** | **Routing & MLOps** | [tg8-routing-mlops-epic.md](tg8-routing-mlops-epic.md) | Medium |
+| **TG9** | **Extensibility** | [tg9-extensibility-epic.md](tg9-extensibility-epic.md) | Low |
+
+### How to Resume an Epic
+
+1. Read the epic plan file for the TG you want to work on.
+2. Create the feature branch as documented (e.g., `git checkout -b tg4-observability`).
+3. Work through sub-TGs sequentially, committing locally.
+4. Run validation commands from the epic plan to verify completion.
+5. Squash merge to `main` when the epic is complete.
+6. Use `rr push` if local push is blocked, then `git pull`.
+
+---
+
+## 5. Next Priorities
+
+1. **Start TG4 (Observability):** Implement routing decision visibility and OTel pipeline.
+2. **Complete TG2.3 (Streaming):** Tune performance gate thresholds and ensure stability.
+3. **Advance TG5 (Security):** Implement durable audit export and secret rotation.

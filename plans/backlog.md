@@ -4,7 +4,7 @@
 > RouteIQ is built on top of upstream [LiteLLM](https://github.com/BerriAI/litellm) for proxy/API compatibility and [LLMRouter](https://github.com/ulab-uiuc/LLMRouter) for ML routing.
 
 **Status:** Active  
-**Last Updated:** 2026-02-03  
+**Last Updated:** 2026-02-04  
 **Resume Checkpoint:** [See TG Backlog & Workflow](resume-checkpoint.md)
 **Context:** Consolidated backlog for Cloud-Native, Security, and MLOps enhancements.
 
@@ -97,3 +97,20 @@ These items are high-impact and safe to implement immediately:
 4.  **P1-05: Secret Rotation (Docs)**
     *   *Action:* Add a section to `docs/security.md` describing how to use K8s Secrets for rotation.
     *   *Benefit:* Clarifies security posture without code changes.
+
+---
+
+## Queued Epic Plans
+
+These epic orchestration plans provide detailed sub-TG breakdowns, acceptance criteria, and validation commands for upcoming Task Groups.
+
+| TG | Epic | Plan Document |
+|----|------|---------------|
+| **TG4** | Observability | [tg4-observability-epic.md](tg4-observability-epic.md) |
+| **TG5** | Security Policy | [tg5-security-policy-epic.md](tg5-security-policy-epic.md) |
+| **TG6** | CI Quality Gates | [tg6-ci-quality-gates-epic.md](tg6-ci-quality-gates-epic.md) |
+| **TG7** | Cloud-Native Deployment | [tg7-cloud-native-deploy-epic.md](tg7-cloud-native-deploy-epic.md) |
+| **TG8** | Routing & MLOps | [tg8-routing-mlops-epic.md](tg8-routing-mlops-epic.md) |
+| **TG9** | Extensibility | [tg9-extensibility-epic.md](tg9-extensibility-epic.md) |
+
+> **Note:** Each epic plan includes goal/non-goals, sub-TG breakdown with acceptance criteria, branch+squash workflow, test commands, and bulk publish instructions.
