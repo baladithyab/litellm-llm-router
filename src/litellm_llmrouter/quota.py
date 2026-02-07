@@ -141,9 +141,7 @@ class QuotaConfig:
         enabled = os.getenv("ROUTEIQ_QUOTA_ENABLED", "false").lower() == "true"
         fail_mode_str = os.getenv("ROUTEIQ_QUOTA_FAIL_MODE", "open").lower()
         fail_mode = (
-            QuotaFailMode.CLOSED
-            if fail_mode_str == "closed"
-            else QuotaFailMode.OPEN
+            QuotaFailMode.CLOSED if fail_mode_str == "closed" else QuotaFailMode.OPEN
         )
 
         limits: list[QuotaLimit] = []
@@ -156,7 +154,9 @@ class QuotaConfig:
                         try:
                             limits.append(QuotaLimit.from_dict(item))
                         except (KeyError, ValueError) as e:
-                            logger.warning(f"Invalid quota limit config: {item}, error: {e}")
+                            logger.warning(
+                                f"Invalid quota limit config: {item}, error: {e}"
+                            )
             except json.JSONDecodeError as e:
                 logger.warning(f"Invalid ROUTEIQ_QUOTA_LIMITS_JSON: {e}")
 
@@ -810,16 +810,18 @@ def derive_quota_subject(request: Request) -> QuotaSubject:
 
 
 # Paths to exclude from quota enforcement (health, docs, etc.)
-QUOTA_EXCLUDED_PATHS = frozenset({
-    "/_health/live",
-    "/_health/ready",
-    "/health",
-    "/health/liveliness",
-    "/health/readiness",
-    "/docs",
-    "/openapi.json",
-    "/redoc",
-})
+QUOTA_EXCLUDED_PATHS = frozenset(
+    {
+        "/_health/live",
+        "/_health/ready",
+        "/health",
+        "/health/liveliness",
+        "/health/readiness",
+        "/docs",
+        "/openapi.json",
+        "/redoc",
+    }
+)
 
 
 async def quota_guard(request: Request) -> QuotaGuardResult:
@@ -895,13 +897,15 @@ async def quota_guard(request: Request) -> QuotaGuardResult:
     reserved_tokens = 0
     reserved_spend = 0.0
     if body:
-        token_results, reserved_tokens, reserved_spend = (
-            await enforcer.reserve_tokens_or_spend(
-                subject=subject,
-                body=body,
-                route=route,
-                model=model,
-            )
+        (
+            token_results,
+            reserved_tokens,
+            reserved_spend,
+        ) = await enforcer.reserve_tokens_or_spend(
+            subject=subject,
+            body=body,
+            route=route,
+            model=model,
         )
         all_results.extend(token_results)
 

@@ -78,20 +78,20 @@ def get_database_url() -> str | None:
 
 class AuditAction(str, Enum):
     """Enumeration of auditable control-plane actions."""
-    
+
     # MCP Server Management
     MCP_SERVER_CREATE = "mcp.server.create"
     MCP_SERVER_UPDATE = "mcp.server.update"
     MCP_SERVER_DELETE = "mcp.server.delete"
-    
+
     # MCP Tool Management
     MCP_TOOL_REGISTER = "mcp.tool.register"
     MCP_TOOL_CALL = "mcp.tool.call"
-    
+
     # Config Reload/Sync
     CONFIG_RELOAD = "system.config.reload"
     CONFIG_SYNC = "system.config.sync"
-    
+
     # A2A Agent Management
     A2A_AGENT_CREATE = "a2a.agent.create"
     A2A_AGENT_DELETE = "a2a.agent.delete"
@@ -99,6 +99,7 @@ class AuditAction(str, Enum):
 
 class AuditOutcome(str, Enum):
     """Outcome of an audited action."""
+
     SUCCESS = "success"
     DENIED = "denied"
     ERROR = "error"
@@ -112,27 +113,27 @@ class AuditOutcome(str, Enum):
 @dataclass
 class AuditLogEntry:
     """A single audit log entry."""
-    
+
     # Identifiers
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     request_id: str | None = None
-    
+
     # Actor (who)
     actor_type: str = "unknown"  # "admin_key", "api_key", "user"
     actor_id: str | None = None  # team_id, user_id, or masked key
-    
+
     # Action (what)
     action: str = ""
-    
+
     # Resource (on what)
     resource_type: str = ""
     resource_id: str | None = None
-    
+
     # Outcome
     outcome: str = "success"  # "success", "denied", "error"
     outcome_reason: str | None = None  # Error message or denial reason
-    
+
     # Context (minimal metadata, no request body)
     metadata: dict[str, Any] = field(default_factory=dict)
 
@@ -161,47 +162,47 @@ class AuditLogEntry:
 class AuditLogRepository:
     """
     Repository for persistent audit log storage.
-    
+
     Uses PostgreSQL when DATABASE_URL is configured.
     Provides graceful degradation based on fail mode configuration.
     """
-    
+
     def __init__(self):
         self._db_url = get_database_url()
         self._enabled = is_audit_log_enabled()
         self._fail_closed = is_audit_fail_closed()
-    
+
     @property
     def is_enabled(self) -> bool:
         """Check if audit logging is enabled and configured."""
         return self._enabled and self._db_url is not None
-    
+
     @property
     def is_fail_closed(self) -> bool:
         """Check if fail-closed mode is enabled."""
         return self._fail_closed
-    
+
     async def write(self, entry: AuditLogEntry) -> bool:
         """
         Write an audit log entry to the database.
-        
+
         Args:
             entry: The audit log entry to write
-            
+
         Returns:
             True if the entry was written successfully
-            
+
         Raises:
             AuditWriteError: If fail-closed mode is enabled and write fails
         """
         if not self._enabled:
             return True  # Audit logging disabled, silently succeed
-        
+
         if not self._db_url:
             # No database configured - log fallback and continue
             self._log_fallback(entry, "No DATABASE_URL configured")
             return True
-        
+
         try:
             await self._persist_to_db(entry)
             verbose_proxy_logger.debug(
@@ -218,7 +219,7 @@ class AuditLogRepository:
             if self._fail_closed:
                 raise AuditWriteError(f"Database write failed: {e}")
             return True
-    
+
     def _log_fallback(self, entry: AuditLogEntry, reason: str) -> None:
         """Log audit entry to application logger as fallback."""
         logger.warning(
@@ -231,12 +232,12 @@ class AuditLogRepository:
                 "fallback_reason": reason,
             },
         )
-    
+
     async def _persist_to_db(self, entry: AuditLogEntry) -> None:
         """Persist audit log entry to PostgreSQL database."""
         import asyncpg
         import json
-        
+
         conn = await asyncpg.connect(self._db_url)
         try:
             await conn.execute(
@@ -262,7 +263,7 @@ class AuditLogRepository:
             )
         finally:
             await conn.close()
-    
+
     async def query(
         self,
         action: str | None = None,
@@ -274,68 +275,72 @@ class AuditLogRepository:
     ) -> list[AuditLogEntry]:
         """
         Query audit logs with optional filters.
-        
+
         This is primarily for administrative/debugging use.
         """
         if not self._db_url:
             return []
-        
+
         try:
             import asyncpg
             import json
-            
+
             conn = await asyncpg.connect(self._db_url)
             try:
                 # Build query with optional filters
                 query = "SELECT * FROM audit_logs WHERE 1=1"
                 params = []
                 param_idx = 1
-                
+
                 if action:
                     query += f" AND action = ${param_idx}"
                     params.append(action)
                     param_idx += 1
-                
+
                 if resource_type:
                     query += f" AND resource_type = ${param_idx}"
                     params.append(resource_type)
                     param_idx += 1
-                    
+
                 if outcome:
                     query += f" AND outcome = ${param_idx}"
                     params.append(outcome)
                     param_idx += 1
-                
+
                 if since:
                     query += f" AND timestamp >= ${param_idx}"
                     params.append(since)
                     param_idx += 1
-                
+
                 if until:
                     query += f" AND timestamp <= ${param_idx}"
                     params.append(until)
                     param_idx += 1
-                
+
                 query += f" ORDER BY timestamp DESC LIMIT ${param_idx}"
                 params.append(limit)
-                
+
                 rows = await conn.fetch(query, *params)
-                
+
                 entries = []
                 for row in rows:
-                    entries.append(AuditLogEntry(
-                        id=row["id"],
-                        timestamp=row["timestamp"],
-                        request_id=row["request_id"],
-                        actor_type=row["actor_type"],
-                        actor_id=row["actor_id"],
-                        action=row["action"],
-                        resource_type=row["resource_type"],
-                        resource_id=row["resource_id"],
-                        outcome=row["outcome"],
-                        outcome_reason=row["outcome_reason"],
-                        metadata=json.loads(row["metadata"]) if row["metadata"] else {},
-                    ))
+                    entries.append(
+                        AuditLogEntry(
+                            id=row["id"],
+                            timestamp=row["timestamp"],
+                            request_id=row["request_id"],
+                            actor_type=row["actor_type"],
+                            actor_id=row["actor_id"],
+                            action=row["action"],
+                            resource_type=row["resource_type"],
+                            resource_id=row["resource_id"],
+                            outcome=row["outcome"],
+                            outcome_reason=row["outcome_reason"],
+                            metadata=json.loads(row["metadata"])
+                            if row["metadata"]
+                            else {},
+                        )
+                    )
                 return entries
             finally:
                 await conn.close()
@@ -346,6 +351,7 @@ class AuditLogRepository:
 
 class AuditWriteError(Exception):
     """Raised when audit log write fails in fail-closed mode."""
+
     pass
 
 
@@ -382,16 +388,18 @@ async def run_audit_migrations() -> None:
     """Run audit log table migrations."""
     db_url = get_database_url()
     if not db_url:
-        verbose_proxy_logger.info("No DATABASE_URL configured, skipping audit migrations")
+        verbose_proxy_logger.info(
+            "No DATABASE_URL configured, skipping audit migrations"
+        )
         return
-    
+
     if not is_audit_log_enabled():
         verbose_proxy_logger.info("Audit logging disabled, skipping migrations")
         return
-    
+
     try:
         import asyncpg
-        
+
         conn = await asyncpg.connect(db_url)
         try:
             await conn.execute(AUDIT_LOGS_TABLE_SQL)
@@ -434,16 +442,16 @@ def reset_audit_repository() -> None:
 def extract_actor_info(rbac_info: dict[str, Any] | None) -> tuple[str, str | None]:
     """
     Extract actor type and ID from RBAC info.
-    
+
     Args:
         rbac_info: RBAC information from requires_permission dependency
-        
+
     Returns:
         (actor_type, actor_id) tuple
     """
     if rbac_info is None:
         return ("unknown", None)
-    
+
     if rbac_info.get("is_admin"):
         # Admin key authentication
         admin_key = rbac_info.get("admin_key", "")
@@ -453,25 +461,25 @@ def extract_actor_info(rbac_info: dict[str, Any] | None) -> tuple[str, str | Non
         else:
             masked = "***"
         return ("admin_key", masked)
-    
+
     # User authentication - extract from user_info
     user_info = rbac_info.get("user_info", {})
-    
+
     # Try to get user/team identifiers
     user_id = user_info.get("user_id")
     team_id = user_info.get("team_id")
-    
+
     if user_id:
         return ("user", user_id)
     if team_id:
         return ("team", team_id)
-    
+
     # Fall back to API key token (masked)
     token = user_info.get("token", "")
     if token:
         masked = "..." + token[-4:] if len(token) > 4 else "***"
         return ("api_key", masked)
-    
+
     return ("unknown", None)
 
 
@@ -486,10 +494,10 @@ async def audit_log(
 ) -> bool:
     """
     Log an audit event for a control-plane action.
-    
+
     This is the primary API for logging audit events. Call this from
     endpoint handlers after the action completes (success or failure).
-    
+
     Args:
         action: The action being performed (use AuditAction enum)
         resource_type: Type of resource (e.g., "mcp_server")
@@ -498,28 +506,28 @@ async def audit_log(
         outcome_reason: Reason for denied/error outcomes
         actor_info: RBAC info dict from requires_permission dependency
         metadata: Additional context (minimal, no request body)
-        
+
     Returns:
         True if logged successfully (or fail-open mode)
-        
+
     Raises:
         AuditWriteError: If fail-closed mode and write fails
     """
     repo = get_audit_repository()
-    
+
     if not repo.is_enabled:
         return True
-    
+
     # Get request ID from context
     request_id = get_request_id() or str(uuid.uuid4())
-    
+
     # Extract actor info
     actor_type, actor_id = extract_actor_info(actor_info)
-    
+
     # Normalize action and outcome to strings
     action_str = action.value if isinstance(action, AuditAction) else str(action)
     outcome_str = outcome.value if isinstance(outcome, AuditOutcome) else str(outcome)
-    
+
     entry = AuditLogEntry(
         request_id=request_id,
         actor_type=actor_type,
@@ -531,7 +539,7 @@ async def audit_log(
         outcome_reason=outcome_reason,
         metadata=metadata or {},
     )
-    
+
     return await repo.write(entry)
 
 

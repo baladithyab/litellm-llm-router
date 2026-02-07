@@ -1356,7 +1356,9 @@ class RoutingPipeline:
                 outcome=outcome,
                 reason=reason,
                 latency_ms=result.latency_ms,
-                error_type=type(Exception(result.error)).__name__ if result.error else None,
+                error_type=type(Exception(result.error)).__name__
+                if result.error
+                else None,
                 error_message=result.error if result.error else None,
                 strategy_version=ab.version if ab else None,
                 fallback_triggered=result.is_fallback,

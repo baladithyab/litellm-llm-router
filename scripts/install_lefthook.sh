@@ -23,13 +23,13 @@ get_lefthook_version() {
         echo "$LEFTHOOK_VERSION"
         return
     fi
-    
+
     # Query GitHub API for latest release
     local latest
     latest=$(curl -fsSL "https://api.github.com/repos/evilmartians/lefthook/releases/latest" \
         | grep '"tag_name"' \
         | sed -E 's/.*"v([^"]+)".*/\1/')
-    
+
     if [[ -z "$latest" ]]; then
         echo "Failed to fetch latest version, falling back to 2.0.15" >&2
         echo "2.0.15"
@@ -106,19 +106,31 @@ main() {
         lefthook_bin="$LOCAL_BIN/lefthook"
     fi
 
+    # Override core.hooksPath for this repo so lefthook installs into .git/hooks
+    # instead of the global hooks directory (e.g. Code Defender at
+    # /usr/local/amazon/var/git-defender/hooks which is root-owned).
+    local current_hooks_path
+    current_hooks_path="$(git config core.hooksPath 2>/dev/null || true)"
+    if [[ -n "$current_hooks_path" && "$current_hooks_path" != ".git/hooks" ]]; then
+        echo "⚠️  Global core.hooksPath detected: $current_hooks_path"
+        echo "   Overriding locally to .git/hooks for this repo..."
+        git config --local core.hooksPath .git/hooks
+        mkdir -p .git/hooks
+    fi
+
     # Install git hooks
     echo ""
     echo "📌 Installing git hooks..."
-    "$lefthook_bin" install
+    "$lefthook_bin" install --force
 
     echo ""
     echo "🎉 Setup complete! Git hooks are now active."
     echo ""
     echo "Commands:"
-    echo "  lefthook run pre-commit    # Run pre-commit hooks manually"
-    echo "  lefthook run post-commit   # Run post-commit hooks manually"
+    echo "  $lefthook_bin run pre-commit    # Run pre-commit hooks manually"
+    echo "  $lefthook_bin run post-commit   # Run post-commit hooks manually"
     echo ""
-    echo "To uninstall: lefthook uninstall"
+    echo "To uninstall: $lefthook_bin uninstall"
 }
 
 main "$@"

@@ -128,7 +128,9 @@ class DNSCache:
     Thread safety is achieved via a threading.Lock.
     """
 
-    def __init__(self, max_size: int = DEFAULT_DNS_CACHE_SIZE, ttl: float = DEFAULT_DNS_CACHE_TTL):
+    def __init__(
+        self, max_size: int = DEFAULT_DNS_CACHE_SIZE, ttl: float = DEFAULT_DNS_CACHE_TTL
+    ):
         self._cache: dict[str, DNSCacheEntry] = {}
         self._lock = threading.Lock()
         self._max_size = max_size
@@ -164,7 +166,9 @@ class DNSCache:
         # If still over capacity, remove oldest entries (LRU-ish)
         if len(self._cache) >= self._max_size:
             # Sort by expiry time and remove oldest
-            sorted_keys = sorted(self._cache.keys(), key=lambda k: self._cache[k].expires_at)
+            sorted_keys = sorted(
+                self._cache.keys(), key=lambda k: self._cache[k].expires_at
+            )
             excess = len(self._cache) - self._max_size + self._cleanup_threshold
             for k in sorted_keys[:excess]:
                 del self._cache[k]
@@ -320,7 +324,9 @@ def _get_ssrf_config() -> dict:
         dns_timeout = DEFAULT_DNS_TIMEOUT
 
     # DNS cache TTL
-    dns_cache_ttl_str = os.getenv("LLMROUTER_SSRF_DNS_CACHE_TTL", str(DEFAULT_DNS_CACHE_TTL))
+    dns_cache_ttl_str = os.getenv(
+        "LLMROUTER_SSRF_DNS_CACHE_TTL", str(DEFAULT_DNS_CACHE_TTL)
+    )
     try:
         dns_cache_ttl = float(dns_cache_ttl_str)
         if dns_cache_ttl <= 0:
@@ -329,7 +335,9 @@ def _get_ssrf_config() -> dict:
         dns_cache_ttl = DEFAULT_DNS_CACHE_TTL
 
     # DNS cache size
-    dns_cache_size_str = os.getenv("LLMROUTER_SSRF_DNS_CACHE_SIZE", str(DEFAULT_DNS_CACHE_SIZE))
+    dns_cache_size_str = os.getenv(
+        "LLMROUTER_SSRF_DNS_CACHE_SIZE", str(DEFAULT_DNS_CACHE_SIZE)
+    )
     try:
         dns_cache_size = int(dns_cache_size_str)
         if dns_cache_size <= 0:

@@ -39,7 +39,11 @@ from litellm._logging import verbose_proxy_logger
 
 # Import SSRF protection utilities
 try:
-    from .url_security import validate_outbound_url, validate_outbound_url_async, SSRFBlockedError
+    from .url_security import (
+        validate_outbound_url,
+        validate_outbound_url_async,
+        SSRFBlockedError,
+    )
 
     SSRF_PROTECTION_AVAILABLE = True
 except ImportError:
@@ -53,6 +57,7 @@ except ImportError:
     async def validate_outbound_url_async(url: str, **kwargs) -> str:
         """No-op fallback when url_security module is not available."""
         return url
+
 
 # Import shared HTTP client pool
 from .http_client_pool import get_client_for_request

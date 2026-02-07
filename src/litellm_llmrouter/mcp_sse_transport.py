@@ -169,7 +169,8 @@ async def cleanup_expired_sessions() -> int:
     """Remove expired sessions from the registry. Returns count removed."""
     async with _sessions_lock:
         expired = [
-            sid for sid, session in _sse_sessions.items()
+            sid
+            for sid, session in _sse_sessions.items()
             if session.is_expired() or not session.is_active
         ]
         for sid in expired:
@@ -282,7 +283,9 @@ def get_messages_endpoint_url(request: Request, session_id: str) -> str:
     """
     # Get the base URL from request (handles reverse proxy scenarios)
     scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
-    host = request.headers.get("x-forwarded-host", request.headers.get("host", request.url.netloc))
+    host = request.headers.get(
+        "x-forwarded-host", request.headers.get("host", request.url.netloc)
+    )
     return f"{scheme}://{host}/mcp/messages?sessionId={session_id}"
 
 
@@ -371,9 +374,7 @@ async def generate_sse_events(
                 last_heartbeat = now
 
     except asyncio.CancelledError:
-        verbose_proxy_logger.info(
-            f"MCP SSE: Session {session.session_id} cancelled"
-        )
+        verbose_proxy_logger.info(f"MCP SSE: Session {session.session_id} cancelled")
     except Exception as e:
         verbose_proxy_logger.exception(
             f"MCP SSE: Error in session {session.session_id}: {e}"
@@ -395,9 +396,7 @@ async def generate_sse_events(
         async with _sessions_lock:
             if session.session_id in _sse_sessions:
                 del _sse_sessions[session.session_id]
-        verbose_proxy_logger.info(
-            f"MCP SSE: Session {session.session_id} closed"
-        )
+        verbose_proxy_logger.info(f"MCP SSE: Session {session.session_id} closed")
 
 
 # ============================================================================
@@ -779,7 +778,9 @@ async def _handle_tools_list_sse(
 
             if tool_name in server.tool_definitions:
                 tool_def = server.tool_definitions[tool_name]
-                tool_entry["description"] = tool_def.description or f"Tool from {server.name}"
+                tool_entry["description"] = (
+                    tool_def.description or f"Tool from {server.name}"
+                )
                 tool_entry["inputSchema"] = tool_def.input_schema or {"type": "object"}
             else:
                 tool_entry["description"] = f"Tool from {server.name}"
@@ -883,7 +884,9 @@ async def _handle_tools_call_sse(
             content = [
                 {
                     "type": "text",
-                    "text": json.dumps(result.result) if not isinstance(result.result, str) else result.result,
+                    "text": json.dumps(result.result)
+                    if not isinstance(result.result, str)
+                    else result.result,
                 }
             ]
             return {
@@ -926,7 +929,9 @@ async def _handle_resources_list_sse(
         resources.append(
             {
                 "uri": res.get("resource", ""),
-                "name": res.get("resource", "").split("/")[-1] if res.get("resource") else "",
+                "name": res.get("resource", "").split("/")[-1]
+                if res.get("resource")
+                else "",
                 "description": f"Resource from {res.get('server_name', 'unknown')}",
             }
         )

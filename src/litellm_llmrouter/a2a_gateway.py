@@ -45,7 +45,11 @@ from .http_client_pool import get_client_for_request
 
 # Import SSRF protection utilities
 try:
-    from .url_security import validate_outbound_url, validate_outbound_url_async, SSRFBlockedError
+    from .url_security import (
+        validate_outbound_url,
+        validate_outbound_url_async,
+        SSRFBlockedError,
+    )
 
     SSRF_PROTECTION_AVAILABLE = True
 except ImportError:
@@ -91,9 +95,7 @@ A2A_RAW_STREAMING_ENABLED = (
 )
 
 # Default chunk size for raw streaming (8KB balances latency vs overhead)
-A2A_RAW_STREAMING_CHUNK_SIZE = int(
-    os.getenv("A2A_RAW_STREAMING_CHUNK_SIZE", "8192")
-)
+A2A_RAW_STREAMING_CHUNK_SIZE = int(os.getenv("A2A_RAW_STREAMING_CHUNK_SIZE", "8192"))
 
 # =============================================================================
 # Header Preservation for Streaming Responses
@@ -112,25 +114,29 @@ STREAMING_HEADERS_TO_PRESERVE = frozenset(
 )
 
 # Hop-by-hop headers that MUST NOT be forwarded (RFC 2616 Section 13.5.1)
-HOP_BY_HOP_HEADERS = frozenset({
-    "connection",
-    "keep-alive",
-    "proxy-authenticate",
-    "proxy-authorization",
-    "te",
-    "trailer",
-    "transfer-encoding",
-    "upgrade",
-})
+HOP_BY_HOP_HEADERS = frozenset(
+    {
+        "connection",
+        "keep-alive",
+        "proxy-authenticate",
+        "proxy-authorization",
+        "te",
+        "trailer",
+        "transfer-encoding",
+        "upgrade",
+    }
+)
 
 # Unsafe headers that should not be forwarded for security reasons
-UNSAFE_HEADERS = frozenset({
-    "set-cookie",
-    "set-cookie2",
-    "authorization",
-    "www-authenticate",
-    "proxy-connection",
-})
+UNSAFE_HEADERS = frozenset(
+    {
+        "set-cookie",
+        "set-cookie2",
+        "authorization",
+        "www-authenticate",
+        "proxy-connection",
+    }
+)
 
 
 def filter_upstream_headers(
@@ -139,34 +145,34 @@ def filter_upstream_headers(
 ) -> dict[str, str]:
     """
     Filter upstream response headers for safe forwarding.
-    
+
     Preserves headers important for streaming (Content-Type, Cache-Control, etc.)
     while stripping hop-by-hop and security-sensitive headers.
-    
+
     Args:
         headers: The upstream response headers (httpx.Headers)
         preserve_list: Set of header names to preserve (lowercase)
-    
+
     Returns:
         Dictionary of safe headers to forward downstream
     """
     filtered: dict[str, str] = {}
-    
+
     for name, value in headers.items():
         name_lower = name.lower()
-        
+
         # Skip hop-by-hop headers (MUST NOT forward)
         if name_lower in HOP_BY_HOP_HEADERS:
             continue
-        
+
         # Skip unsafe headers
         if name_lower in UNSAFE_HEADERS:
             continue
-        
+
         # Only preserve headers in the allow-list
         if name_lower in preserve_list:
             filtered[name] = value
-    
+
     return filtered
 
 
@@ -174,10 +180,11 @@ def filter_upstream_headers(
 class StreamingResponseMeta:
     """
     Metadata for streaming responses including preserved upstream headers.
-    
+
     This is returned alongside the chunk generator to allow callers to
     construct proper streaming responses with correct headers.
     """
+
     headers: dict[str, str] = field(default_factory=dict)
     status_code: int = 200
 
@@ -452,7 +459,7 @@ class A2AGateway:
             )
 
         method = request.method
-        
+
         # Route message/stream to the streaming endpoint
         if method == "message/stream":
             return JSONRPCResponse.error_response(
@@ -461,7 +468,7 @@ class A2AGateway:
                 "Use streaming endpoint for message/stream method. "
                 "POST to /a2a/{agent_id} with Accept: text/event-stream header.",
             )
-        
+
         if method != "message/send":
             return JSONRPCResponse.error_response(
                 request.id, -32601, f"Method '{method}' not found"
@@ -555,34 +562,34 @@ class A2AGateway:
     ) -> tuple[StreamingResponseMeta, AsyncIterator[bytes]]:
         """
         Stream response from an agent with preserved upstream headers.
-        
+
         This method returns both the streaming iterator and metadata including
         preserved upstream headers (Content-Type, Cache-Control, etc.).
-        
+
         Use this method when you need to preserve upstream headers on the
         streaming response (e.g., for proper SSE handling).
-        
+
         Returns:
             Tuple of (StreamingResponseMeta, AsyncIterator[bytes])
             - meta: Contains preserved headers and status code
             - iterator: Raw byte iterator for streaming response
-        
+
         Raises:
             ValueError: If gateway is disabled or agent not found
         """
         if not self.enabled:
             raise ValueError("A2A Gateway is not enabled")
-        
+
         # Get agent under lock
         with self._lock:
             agent = self.agents.get(agent_id)
-        
+
         if not agent:
             raise ValueError(f"Agent '{agent_id}' not found")
-        
+
         if not agent.url:
             raise ValueError(f"Agent '{agent_id}' has no URL configured")
-        
+
         # Security: Validate URL against SSRF attacks
         try:
             await validate_outbound_url_async(agent.url)
@@ -596,18 +603,18 @@ class A2AGateway:
                 f"A2A: Invalid URL for agent '{agent_id}': {e}"
             )
             raise ValueError(f"Agent URL is invalid: {str(e)}")
-        
+
         verbose_proxy_logger.info(
             f"A2A: Raw streaming with headers from agent '{agent_id}'"
         )
-        
+
         # Inject W3C trace context headers for distributed tracing
         headers = {"Content-Type": "application/json"}
         headers = inject_trace_headers(headers)
-        
+
         # Create client and stream - caller is responsible for consuming
         client = await get_client_for_request(timeout=120.0).__aenter__()
-        
+
         try:
             # Start the streaming request
             response = await client.send(
@@ -620,14 +627,14 @@ class A2AGateway:
                 stream=True,
             )
             response.raise_for_status()
-            
+
             # Extract preserved headers
             preserved_headers = filter_upstream_headers(response.headers)
             meta = StreamingResponseMeta(
                 headers=preserved_headers,
                 status_code=response.status_code,
             )
-            
+
             async def chunk_iterator() -> AsyncIterator[bytes]:
                 """Iterate over raw bytes and cleanup when done."""
                 try:
@@ -639,9 +646,9 @@ class A2AGateway:
                 finally:
                     await response.aclose()
                     await client.aclose()
-            
+
             return meta, chunk_iterator()
-            
+
         except Exception:
             # Cleanup on error
             await client.aclose()

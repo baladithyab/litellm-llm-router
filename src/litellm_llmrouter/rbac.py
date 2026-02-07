@@ -56,13 +56,15 @@ PERMISSION_SYSTEM_CONFIG_RELOAD = "system.config.reload"
 PERMISSION_A2A_AGENT_WRITE = "a2a.agent.write"
 
 # All known permissions (used for validation/documentation)
-ALL_PERMISSIONS = frozenset({
-    PERMISSION_MCP_SERVER_WRITE,
-    PERMISSION_MCP_TOOL_WRITE,
-    PERMISSION_MCP_TOOL_CALL,
-    PERMISSION_SYSTEM_CONFIG_RELOAD,
-    PERMISSION_A2A_AGENT_WRITE,
-})
+ALL_PERMISSIONS = frozenset(
+    {
+        PERMISSION_MCP_SERVER_WRITE,
+        PERMISSION_MCP_TOOL_WRITE,
+        PERMISSION_MCP_TOOL_CALL,
+        PERMISSION_SYSTEM_CONFIG_RELOAD,
+        PERMISSION_A2A_AGENT_WRITE,
+    }
+)
 
 # Superuser permission that grants all access (alternative to admin key)
 PERMISSION_SUPERUSER = "*"
@@ -316,7 +318,10 @@ def requires_permission(permission: str):
         # Authenticated but missing permission
         logger.warning(
             f"RBAC: Permission denied for {path} - requires {permission}",
-            extra={"request_id": request_id, "user_permissions": list(user_permissions)},
+            extra={
+                "request_id": request_id,
+                "user_permissions": list(user_permissions),
+            },
         )
         raise HTTPException(
             status_code=403,

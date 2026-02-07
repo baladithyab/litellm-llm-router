@@ -80,13 +80,15 @@ logger = logging.getLogger(__name__)
 # Default configuration
 DEFAULT_MAX_CONCURRENT_REQUESTS = 0  # 0 = disabled
 DEFAULT_DRAIN_TIMEOUT_SECONDS = 30
-DEFAULT_EXCLUDED_PATHS = frozenset({
-    "/_health/live",
-    "/_health/ready",
-    "/health/liveliness",
-    "/health/readiness",
-    "/health",
-})
+DEFAULT_EXCLUDED_PATHS = frozenset(
+    {
+        "/_health/live",
+        "/_health/ready",
+        "/health/liveliness",
+        "/health/readiness",
+        "/health",
+    }
+)
 
 # Circuit Breaker defaults
 DEFAULT_CB_FAILURE_THRESHOLD = 5  # Number of failures before circuit opens
@@ -101,13 +103,17 @@ class ResilienceConfig:
 
     max_concurrent_requests: int = DEFAULT_MAX_CONCURRENT_REQUESTS
     drain_timeout_seconds: float = DEFAULT_DRAIN_TIMEOUT_SECONDS
-    excluded_paths: frozenset[str] = field(default_factory=lambda: DEFAULT_EXCLUDED_PATHS)
+    excluded_paths: frozenset[str] = field(
+        default_factory=lambda: DEFAULT_EXCLUDED_PATHS
+    )
 
     @classmethod
     def from_env(cls) -> "ResilienceConfig":
         """Load configuration from environment variables."""
         max_concurrent_str = os.getenv("ROUTEIQ_MAX_CONCURRENT_REQUESTS", "0")
-        drain_timeout_str = os.getenv("ROUTEIQ_DRAIN_TIMEOUT_SECONDS", str(DEFAULT_DRAIN_TIMEOUT_SECONDS))
+        drain_timeout_str = os.getenv(
+            "ROUTEIQ_DRAIN_TIMEOUT_SECONDS", str(DEFAULT_DRAIN_TIMEOUT_SECONDS)
+        )
 
         try:
             max_concurrent = int(max_concurrent_str)
@@ -330,7 +336,9 @@ class BackpressureMiddleware:
         """Check if a path should be excluded from rate limiting."""
         return path in self._config.excluded_paths
 
-    async def _send_503_response(self, send: Send, request_id: str | None = None) -> None:
+    async def _send_503_response(
+        self, send: Send, request_id: str | None = None
+    ) -> None:
         """Send a 503 over-capacity JSON response."""
         body = {
             "error": "over_capacity",
@@ -340,22 +348,27 @@ class BackpressureMiddleware:
             body["request_id"] = request_id
 
         import json
+
         body_bytes = json.dumps(body).encode("utf-8")
 
-        await send({
-            "type": "http.response.start",
-            "status": 503,
-            "headers": [
-                (b"content-type", b"application/json"),
-                (b"content-length", str(len(body_bytes)).encode()),
-                (b"retry-after", b"1"),
-            ],
-        })
-        await send({
-            "type": "http.response.body",
-            "body": body_bytes,
-            "more_body": False,
-        })
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 503,
+                "headers": [
+                    (b"content-type", b"application/json"),
+                    (b"content-length", str(len(body_bytes)).encode()),
+                    (b"retry-after", b"1"),
+                ],
+            }
+        )
+        await send(
+            {
+                "type": "http.response.body",
+                "body": body_bytes,
+                "more_body": False,
+            }
+        )
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         """ASGI entry point."""
@@ -480,13 +493,13 @@ def add_backpressure_middleware(app: Any) -> bool:
             "Backpressure middleware disabled (ROUTEIQ_MAX_CONCURRENT_REQUESTS not set or 0)"
         )
         # Still wrap for drain tracking even when limiting is disabled
-        original_app = app.app if hasattr(app, 'app') else None
+        original_app = app.app if hasattr(app, "app") else None
         if original_app:
             app.app = BackpressureMiddleware(original_app, config, drain_manager)
         return False
 
     # Add as ASGI middleware by wrapping the app
-    original_app = app.app if hasattr(app, 'app') else None
+    original_app = app.app if hasattr(app, "app") else None
     if original_app:
         app.app = BackpressureMiddleware(original_app, config, drain_manager)
     else:
@@ -567,19 +580,33 @@ class CircuitBreakerConfig:
 
         def get_int(key: str, default: int) -> int:
             try:
-                return int(os.getenv(f"{env_prefix}{key}", os.getenv(f"ROUTEIQ_CB_{key}", str(default))))
+                return int(
+                    os.getenv(
+                        f"{env_prefix}{key}",
+                        os.getenv(f"ROUTEIQ_CB_{key}", str(default)),
+                    )
+                )
             except ValueError:
                 return default
 
         def get_float(key: str, default: float) -> float:
             try:
-                return float(os.getenv(f"{env_prefix}{key}", os.getenv(f"ROUTEIQ_CB_{key}", str(default))))
+                return float(
+                    os.getenv(
+                        f"{env_prefix}{key}",
+                        os.getenv(f"ROUTEIQ_CB_{key}", str(default)),
+                    )
+                )
             except ValueError:
                 return default
 
         return cls(
-            failure_threshold=get_int("FAILURE_THRESHOLD", DEFAULT_CB_FAILURE_THRESHOLD),
-            success_threshold=get_int("SUCCESS_THRESHOLD", DEFAULT_CB_SUCCESS_THRESHOLD),
+            failure_threshold=get_int(
+                "FAILURE_THRESHOLD", DEFAULT_CB_FAILURE_THRESHOLD
+            ),
+            success_threshold=get_int(
+                "SUCCESS_THRESHOLD", DEFAULT_CB_SUCCESS_THRESHOLD
+            ),
             timeout_seconds=get_float("TIMEOUT_SECONDS", DEFAULT_CB_TIMEOUT_SECONDS),
             window_seconds=get_float("WINDOW_SECONDS", DEFAULT_CB_WINDOW_SECONDS),
         )
@@ -628,7 +655,10 @@ class CircuitBreaker:
         """Get current circuit state (checking for timeout transition)."""
         if self._state == CircuitBreakerState.OPEN:
             # Check if timeout has passed -> transition to half-open
-            if self._opened_at and time.monotonic() - self._opened_at >= self._config.timeout_seconds:
+            if (
+                self._opened_at
+                and time.monotonic() - self._opened_at >= self._config.timeout_seconds
+            ):
                 return CircuitBreakerState.HALF_OPEN
         return self._state
 
@@ -759,7 +789,10 @@ class CircuitBreaker:
                 raise CircuitBreakerOpenError(self.name, self.time_until_retry)
 
             # Transition to half-open if timeout passed (handled by state property)
-            if self._state == CircuitBreakerState.OPEN and current_state == CircuitBreakerState.HALF_OPEN:
+            if (
+                self._state == CircuitBreakerState.OPEN
+                and current_state == CircuitBreakerState.HALF_OPEN
+            ):
                 await self._transition_to(CircuitBreakerState.HALF_OPEN)
 
         try:
@@ -899,13 +932,11 @@ class CircuitBreakerManager:
     def get_status(self) -> dict[str, Any]:
         """Get aggregated status for all circuit breakers."""
         breakers_status = {
-            name: breaker.get_status()
-            for name, breaker in self._breakers.items()
+            name: breaker.get_status() for name, breaker in self._breakers.items()
         }
 
         degraded_names = [
-            name for name, breaker in self._breakers.items()
-            if breaker.is_open
+            name for name, breaker in self._breakers.items() if breaker.is_open
         ]
 
         return {
@@ -971,9 +1002,7 @@ async def execute_with_circuit_breaker(
             return await operation(*args, **kwargs)
     except CircuitBreakerOpenError:
         if fallback is not None:
-            logger.debug(
-                f"Circuit breaker '{breaker.name}' open, using fallback"
-            )
+            logger.debug(f"Circuit breaker '{breaker.name}' open, using fallback")
             result = fallback()
             if asyncio.iscoroutine(result):
                 return await result

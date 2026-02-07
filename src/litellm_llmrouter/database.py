@@ -379,11 +379,12 @@ async def run_migrations() -> None:
             verbose_proxy_logger.info("A2A DB: Migrations completed successfully")
         finally:
             await conn.close()
-        
+
         # Run audit log migrations
         from .audit import run_audit_migrations
+
         await run_audit_migrations()
-        
+
     except ImportError:
         verbose_proxy_logger.warning("asyncpg not installed, skipping migrations")
     except Exception as e:

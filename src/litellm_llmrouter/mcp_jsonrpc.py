@@ -232,7 +232,9 @@ async def _handle_tools_list(
             # Add detailed info if available from tool definitions
             if tool_name in server.tool_definitions:
                 tool_def = server.tool_definitions[tool_name]
-                tool_entry["description"] = tool_def.description or f"Tool from {server.name}"
+                tool_entry["description"] = (
+                    tool_def.description or f"Tool from {server.name}"
+                )
                 tool_entry["inputSchema"] = tool_def.input_schema or {"type": "object"}
             else:
                 # Basic entry for tools without detailed definitions
@@ -342,7 +344,9 @@ async def _handle_tools_call(
             content = [
                 {
                     "type": "text",
-                    "text": json.dumps(result.result) if not isinstance(result.result, str) else result.result,
+                    "text": json.dumps(result.result)
+                    if not isinstance(result.result, str)
+                    else result.result,
                 }
             ]
             return _make_success_response(request_id, {"content": content})
@@ -354,7 +358,9 @@ async def _handle_tools_call(
                     "text": result.error or "Tool invocation failed",
                 }
             ]
-            return _make_success_response(request_id, {"content": content, "isError": True})
+            return _make_success_response(
+                request_id, {"content": content, "isError": True}
+            )
 
     except Exception as e:
         return _make_error_response(
@@ -394,7 +400,9 @@ async def _handle_resources_list(
         resources.append(
             {
                 "uri": res.get("resource", ""),
-                "name": res.get("resource", "").split("/")[-1] if res.get("resource") else "",
+                "name": res.get("resource", "").split("/")[-1]
+                if res.get("resource")
+                else "",
                 "description": f"Resource from {res.get('server_name', 'unknown')}",
             }
         )
@@ -471,11 +479,15 @@ async def mcp_jsonrpc_endpoint(request: Request) -> JSONResponse:
 
         data = json.loads(body)
     except json.JSONDecodeError as e:
-        return _make_error_response(None, JSONRPC_PARSE_ERROR, f"Invalid JSON: {str(e)}")
+        return _make_error_response(
+            None, JSONRPC_PARSE_ERROR, f"Invalid JSON: {str(e)}"
+        )
 
     # Validate JSON-RPC structure
     if not isinstance(data, dict):
-        return _make_error_response(None, JSONRPC_INVALID_REQUEST, "Request must be a JSON object")
+        return _make_error_response(
+            None, JSONRPC_INVALID_REQUEST, "Request must be a JSON object"
+        )
 
     jsonrpc_version = data.get("jsonrpc")
     if jsonrpc_version != "2.0":
@@ -490,7 +502,9 @@ async def mcp_jsonrpc_endpoint(request: Request) -> JSONResponse:
     params = data.get("params")
 
     if not method or not isinstance(method, str):
-        return _make_error_response(request_id, JSONRPC_INVALID_REQUEST, "Missing or invalid 'method' field")
+        return _make_error_response(
+            request_id, JSONRPC_INVALID_REQUEST, "Missing or invalid 'method' field"
+        )
 
     # Dispatch to method handler
     handler = METHOD_HANDLERS.get(method)

@@ -290,7 +290,9 @@ async def readiness_probe():
             "breakers": {
                 name: {"state": info["state"]}
                 for name, info in cb_status["breakers"].items()
-            } if cb_status["breakers"] else {},
+            }
+            if cb_status["breakers"]
+            else {},
         }
 
     # Check database if configured
@@ -323,7 +325,10 @@ async def readiness_probe():
                 await db_breaker.record_success()
             except asyncio.TimeoutError:
                 await db_breaker.record_failure("connection timeout")
-                checks["database"] = {"status": "unhealthy", "error": "connection timeout"}
+                checks["database"] = {
+                    "status": "unhealthy",
+                    "error": "connection timeout",
+                }
                 is_ready = False
             except ImportError:
                 # asyncpg not installed, try basic connectivity via litellm
@@ -334,7 +339,10 @@ async def readiness_probe():
             except Exception as e:
                 await db_breaker.record_failure(str(e))
                 # Sanitize: don't leak exception details in health check response
-                checks["database"] = {"status": "unhealthy", "error": "connection failed"}
+                checks["database"] = {
+                    "status": "unhealthy",
+                    "error": "connection failed",
+                }
                 is_ready = False
 
     # Check Redis if configured
@@ -441,7 +449,7 @@ async def _handle_audit_write(
 ):
     """
     Handle audit write with fail-closed mode support.
-    
+
     If fail-closed mode is enabled and audit write fails, raises 503.
     Otherwise, failure is logged and the request continues.
     """
@@ -666,7 +674,7 @@ async def unregister_a2a_agent_convenience(
         agent = global_agent_registry.get_agent_by_id(agent_id)
         if agent:
             global_agent_registry.deregister_agent(agent_name=agent.agent_name)
-            
+
             # Audit log the success
             await _handle_audit_write(
                 AuditAction.A2A_AGENT_DELETE,
@@ -676,7 +684,7 @@ async def unregister_a2a_agent_convenience(
                 rbac_info,
                 request_id,
             )
-            
+
             return {
                 "status": "unregistered",
                 "agent_id": agent_id,
@@ -687,7 +695,7 @@ async def unregister_a2a_agent_convenience(
         agent = global_agent_registry.get_agent_by_name(agent_id)
         if agent:
             global_agent_registry.deregister_agent(agent_name=agent_id)
-            
+
             # Audit log the success
             await _handle_audit_write(
                 AuditAction.A2A_AGENT_DELETE,
@@ -697,7 +705,7 @@ async def unregister_a2a_agent_convenience(
                 rbac_info,
                 request_id,
             )
-            
+
             return {
                 "status": "unregistered",
                 "agent_name": agent_id,
@@ -806,7 +814,7 @@ async def register_mcp_server(
             metadata=server.metadata,
         )
         gateway.register_server(mcp_server)
-        
+
         # Audit log the success
         await _handle_audit_write(
             AuditAction.MCP_SERVER_CREATE,
@@ -1514,7 +1522,7 @@ async def reload_config(
         manager = get_sync_manager()
         force_sync = request.force_sync if request else False
         result = manager.reload_config(force_sync=force_sync)
-        
+
         # Audit log the success
         await _handle_audit_write(
             AuditAction.CONFIG_RELOAD,
@@ -1524,7 +1532,7 @@ async def reload_config(
             rbac_info,
             request_id,
         )
-        
+
         return result
     except HTTPException:
         raise
@@ -1549,7 +1557,7 @@ async def reload_config_2(
         manager = get_hot_reload_manager()
         force_sync = request.force_sync if request else False
         result = manager.reload_config(force_sync=force_sync)
-        
+
         # Audit log the success
         await _handle_audit_write(
             AuditAction.CONFIG_RELOAD,
@@ -1559,7 +1567,7 @@ async def reload_config_2(
             rbac_info,
             request_id,
         )
-        
+
         return result
     except HTTPException:
         raise

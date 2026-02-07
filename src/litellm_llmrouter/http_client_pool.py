@@ -235,8 +235,7 @@ def get_http_client() -> httpx.AsyncClient:
 
     if _http_client is None:
         raise RuntimeError(
-            "HTTP client pool not initialized. "
-            "Call startup_http_client_pool() first."
+            "HTTP client pool not initialized. Call startup_http_client_pool() first."
         )
 
     return _http_client

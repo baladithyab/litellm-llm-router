@@ -622,33 +622,29 @@ class PluginManager:
         settings: dict[str, Any] = {}
 
         # Gateway feature flags
-        settings["mcp_gateway_enabled"] = os.getenv(
-            "MCP_GATEWAY_ENABLED", "false"
-        ).lower() == "true"
-        settings["a2a_gateway_enabled"] = os.getenv(
-            "A2A_GATEWAY_ENABLED", "false"
-        ).lower() == "true"
-        settings["otel_enabled"] = os.getenv(
-            "OTEL_ENABLED", "true"
-        ).lower() != "false"
-        settings["policy_engine_enabled"] = os.getenv(
-            "POLICY_ENGINE_ENABLED", "false"
-        ).lower() == "true"
+        settings["mcp_gateway_enabled"] = (
+            os.getenv("MCP_GATEWAY_ENABLED", "false").lower() == "true"
+        )
+        settings["a2a_gateway_enabled"] = (
+            os.getenv("A2A_GATEWAY_ENABLED", "false").lower() == "true"
+        )
+        settings["otel_enabled"] = os.getenv("OTEL_ENABLED", "true").lower() != "false"
+        settings["policy_engine_enabled"] = (
+            os.getenv("POLICY_ENGINE_ENABLED", "false").lower() == "true"
+        )
 
         # Config paths
         settings["config_path"] = os.getenv("LITELLM_CONFIG_PATH", "")
         settings["policy_config_path"] = os.getenv("POLICY_CONFIG_PATH", "")
 
         # Service info
-        settings["service_name"] = os.getenv(
-            "OTEL_SERVICE_NAME", "litellm-gateway"
-        )
+        settings["service_name"] = os.getenv("OTEL_SERVICE_NAME", "litellm-gateway")
 
         # Plugin-specific settings (prefixed with ROUTEIQ_PLUGIN_)
         for key, value in os.environ.items():
             if key.startswith("ROUTEIQ_PLUGIN_"):
                 # Strip prefix and lowercase for plugin consumption
-                setting_key = key[len("ROUTEIQ_PLUGIN_"):].lower()
+                setting_key = key[len("ROUTEIQ_PLUGIN_") :].lower()
                 settings[setting_key] = value
 
         return settings
@@ -719,9 +715,7 @@ class PluginManager:
         # Create context
         self._context = self._create_context()
 
-        startup_timeout = float(
-            os.getenv("ROUTEIQ_PLUGIN_STARTUP_TIMEOUT", "30")
-        )
+        startup_timeout = float(os.getenv("ROUTEIQ_PLUGIN_STARTUP_TIMEOUT", "30"))
 
         for plugin in sorted_plugins:
             if plugin.name in self._quarantined:

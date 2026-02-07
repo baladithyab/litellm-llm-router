@@ -1,16 +1,14 @@
 name: Build and Push Docker Image
 
 on:
-  push:
+  # Run after CI completes on main (only if CI succeeded)
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
     branches: [main]
+  # Tags still trigger directly (no CI run on tags)
+  push:
     tags: ['v*']
-    paths:
-      - 'docker/**'
-      - 'src/**'
-      - 'pyproject.toml'
-      - 'uv.lock'
-      - 'config/**'
-      - '.github/workflows/docker-build.yml'
   pull_request:
     branches: [main]
     paths:
@@ -303,7 +301,8 @@ jobs:
   # PUSH/TAG WORKFLOW: Multi-arch build → merge manifest → security scan
   # =============================================================================
   check-rebuild:
-    if: github.event_name != 'pull_request'
+    # Skip if triggered by workflow_run and CI failed
+    if: github.event_name != 'pull_request' && (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success')
     runs-on: ubuntu-latest
     permissions:
       contents: read  # Required for checkout

@@ -74,7 +74,7 @@ def _configure_middleware(app: FastAPI) -> None:
     Configure all middleware for the application.
 
     Middleware is added in order (first added = outermost).
-    
+
     Load order:
     1. RequestIDMiddleware - Request correlation (outermost)
     2. PolicyMiddleware - OPA-style policy enforcement (ASGI level)
@@ -89,13 +89,13 @@ def _configure_middleware(app: FastAPI) -> None:
     # Request ID middleware - should be outermost for correlation
     app.add_middleware(RequestIDMiddleware)
     logger.debug("Added RequestIDMiddleware")
-    
+
     # Policy middleware - OPA-style enforcement at ASGI layer
     # This runs BEFORE routing and FastAPI authentication
     # Enables denial before streaming begins, no response buffering
     if add_policy_middleware(app):
         logger.info("Added PolicyMiddleware (policy enforcement enabled)")
-    
+
     # Router decision telemetry middleware - emits TG4.1 router.* span attributes
     if register_router_decision_middleware(app):
         logger.debug("Added RouterDecisionMiddleware")
@@ -376,7 +376,9 @@ def create_app(
     if enable_resilience:
         add_backpressure_middleware(app)
         # Store graceful shutdown function for external use
-        app.state.graceful_shutdown = lambda timeout=None: graceful_shutdown(app, timeout)
+        app.state.graceful_shutdown = lambda timeout=None: graceful_shutdown(
+            app, timeout
+        )
         logger.debug("Resilience middleware and drain manager attached")
 
     logger.info("Gateway app created and configured")
@@ -422,7 +424,7 @@ def create_standalone_app(
         """Lifespan context manager for standalone app."""
         # Initialize HTTP client pool
         await _startup_http_client_pool()
-        
+
         if enable_plugins:
             await _run_plugin_startup(app)
         try:
@@ -453,7 +455,9 @@ def create_standalone_app(
     # Add backpressure middleware (wraps ASGI app)
     if enable_resilience:
         add_backpressure_middleware(app)
-        app.state.graceful_shutdown = lambda timeout=None: graceful_shutdown(app, timeout)
+        app.state.graceful_shutdown = lambda timeout=None: graceful_shutdown(
+            app, timeout
+        )
         logger.debug("Resilience middleware and drain manager attached")
 
     logger.info("Standalone gateway app created")
