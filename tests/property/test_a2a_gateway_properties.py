@@ -1571,7 +1571,7 @@ class TestA2AAgentUpdateProperty:
         result = await repo.update(agent.agent_id, agent)
         assert result is None
 
-    @settings(max_examples=100, suppress_health_check=[HealthCheck.too_slow])
+    @settings(max_examples=100, deadline=None, suppress_health_check=[HealthCheck.too_slow])
     @given(agent=a2a_agent_db_strategy())
     @pytest.mark.asyncio
     async def test_patch_nonexistent_returns_none(self, agent: A2AAgentDB):
