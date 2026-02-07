@@ -1,14 +1,10 @@
 name: Build and Push Docker Image
 
 on:
-  # Run after CI completes on main (only if CI succeeded)
-  workflow_run:
-    workflows: ["CI"]
-    types: [completed]
-    branches: [main]
-  # Tags still trigger directly (no CI run on tags)
+  # Only push to GHCR on tagged releases (v*)
   push:
     tags: ['v*']
+  # PR builds: build-only (no push), smoke test, trivy scan
   pull_request:
     branches: [main]
     paths:
@@ -18,13 +14,9 @@ on:
       - 'uv.lock'
       - 'config/**'
       - '.github/workflows/docker-build.yml'
+  # Manual trigger for testing or emergency builds
   workflow_dispatch:
     inputs:
-      push_image:
-        description: 'Push image to registry'
-        required: false
-        default: false
-        type: boolean
       force_rebuild:
         description: 'Force rebuild without cache'
         required: false
@@ -298,45 +290,11 @@ jobs:
           fi
 
   # =============================================================================
-  # PUSH/TAG WORKFLOW: Multi-arch build → merge manifest → security scan
+  # TAG/RELEASE WORKFLOW: Multi-arch build → merge manifest → security scan
+  # Only runs on tagged releases (v*) or manual workflow_dispatch
   # =============================================================================
-  check-rebuild:
-    # Skip if triggered by workflow_run and CI failed
-    if: github.event_name != 'pull_request' && (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success')
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read  # Required for checkout
-    outputs:
-      should_build: ${{ steps.check.outputs.should_build }}
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
-        with:
-          fetch-depth: 2
-
-      - name: Check if rebuild needed
-        id: check
-        run: |
-          if [[ "${{ github.ref_type }}" == "tag" ]] || \
-             [[ "${{ github.event_name }}" == "workflow_dispatch" ]] || \
-             [[ "${{ github.event.inputs.force_rebuild }}" == "true" ]]; then
-            echo "should_build=true" >> $GITHUB_OUTPUT
-            echo "Build triggered: tag/workflow_dispatch/force_rebuild"
-            exit 0
-          fi
-
-          CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || echo "")
-
-          if echo "$CHANGED_FILES" | grep -qE '^(docker/|src/|pyproject\.toml|uv\.lock|config/)'; then
-            echo "should_build=true" >> $GITHUB_OUTPUT
-            echo "Build triggered: Docker-related files changed"
-          else
-            echo "should_build=false" >> $GITHUB_OUTPUT
-            echo "Skip build: No Docker-related files changed"
-          fi
-
   build:
-    needs: check-rebuild
-    if: github.event_name != 'pull_request' && needs.check-rebuild.outputs.should_build == 'true'
+    if: github.event_name != 'pull_request'
     permissions:
       contents: read
       packages: write
@@ -396,11 +354,9 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=ref,event=branch
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=sha,prefix=
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=latest
 
       - name: Prepare platform pair
         id: platform
@@ -440,8 +396,8 @@ jobs:
 
   merge:
     runs-on: ubuntu-latest
-    needs: [check-rebuild, build]
-    if: github.event_name != 'pull_request' && needs.check-rebuild.outputs.should_build == 'true'
+    needs: build
+    if: github.event_name != 'pull_request'
     permissions:
       contents: read
       packages: write
@@ -473,11 +429,9 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=ref,event=branch
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=sha,prefix=
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=latest
 
       - name: Create manifest list and push
         id: manifest
@@ -496,8 +450,8 @@ jobs:
 
   # Security scan for pushed images (runs on fresh runner to avoid disk space issues)
   security-scan:
-    needs: [check-rebuild, merge]
-    if: github.event_name != 'pull_request' && needs.check-rebuild.outputs.should_build == 'true'
+    needs: merge
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       contents: read
