@@ -14,12 +14,10 @@ Run tests:
     uv run pytest tests/unit/test_quota.py -v
 """
 
-import asyncio
 import hashlib
 import json
 import os
 import time
-from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -33,7 +31,6 @@ from litellm_llmrouter.quota import (
     QuotaConfig,
     QuotaSubject,
     QuotaCheckResult,
-    QuotaGuardResult,
     QuotaRepository,
     QuotaEnforcer,
     derive_quota_subject,
@@ -41,7 +38,6 @@ from litellm_llmrouter.quota import (
     get_quota_enforcer,
     reset_quota_enforcer,
     QUOTA_EXCLUDED_PATHS,
-    CHECK_AND_INCREMENT_LUA,
 )
 
 
@@ -362,10 +358,12 @@ class TestLuaCheckAndIncrement:
             mock_float_script = AsyncMock(return_value=["0.05", "10.0", 86400, 1])
             mock_int_script = AsyncMock()
             mock_redis = AsyncMock()
-            mock_redis.register_script = MagicMock(side_effect=[
-                mock_int_script,
-                mock_float_script,
-            ])
+            mock_redis.register_script = MagicMock(
+                side_effect=[
+                    mock_int_script,
+                    mock_float_script,
+                ]
+            )
             MockRedis.return_value = mock_redis
 
             repo = QuotaRepository()
@@ -611,13 +609,16 @@ class TestSpendCalculation:
         enforcer = QuotaEnforcer(config=config)
 
         # Mock litellm.model_cost
-        with patch("litellm.model_cost", {
-            "gpt-4": {
-                "input_cost_per_token": 0.00003,
-                "output_cost_per_token": 0.00006,
-            }
-        }):
-            spend = enforcer._calculate_spend_reservation(1000, 500, model="gpt-4")
+        with patch(
+            "litellm.model_cost",
+            {
+                "gpt-4": {
+                    "input_cost_per_token": 0.00003,
+                    "output_cost_per_token": 0.00006,
+                }
+            },
+        ):
+            enforcer._calculate_spend_reservation(1000, 500, model="gpt-4")
 
             # 1000 * 0.00003 + 500 * 0.00006 = 0.03 + 0.03 = $0.06
             # Wait, that's per token not per 1K
@@ -669,10 +670,12 @@ class TestQuotaConfig:
 
     def test_config_from_env_with_limits(self):
         """Config with JSON limits."""
-        limits_json = json.dumps([
-            {"metric": "requests", "window": "minute", "limit": 60},
-            {"metric": "total_tokens", "window": "hour", "limit": 100000},
-        ])
+        limits_json = json.dumps(
+            [
+                {"metric": "requests", "window": "minute", "limit": 60},
+                {"metric": "total_tokens", "window": "hour", "limit": 100000},
+            ]
+        )
 
         env = {
             "ROUTEIQ_QUOTA_ENABLED": "true",
@@ -756,9 +759,11 @@ class TestQuotaGuard:
         """Guard raises 429 when quota exceeded."""
         from fastapi import HTTPException
 
-        limits_json = json.dumps([
-            {"metric": "requests", "window": "minute", "limit": 5},
-        ])
+        limits_json = json.dumps(
+            [
+                {"metric": "requests", "window": "minute", "limit": 5},
+            ]
+        )
         env = {
             "ROUTEIQ_QUOTA_ENABLED": "true",
             "ROUTEIQ_QUOTA_LIMITS_JSON": limits_json,
@@ -805,9 +810,11 @@ class TestQuotaGuard:
 
         mock_request.body = return_body
 
-        limits_json = json.dumps([
-            {"metric": "total_tokens", "window": "hour", "limit": 100000},
-        ])
+        limits_json = json.dumps(
+            [
+                {"metric": "total_tokens", "window": "hour", "limit": 100000},
+            ]
+        )
         env = {
             "ROUTEIQ_QUOTA_ENABLED": "true",
             "ROUTEIQ_QUOTA_LIMITS_JSON": limits_json,
@@ -960,13 +967,15 @@ class TestQuotaEnforcerIntegration:
                 "max_tokens": 500,
             }
 
-            results, reserved_tokens, reserved_spend = (
-                await enforcer.reserve_tokens_or_spend(
-                    subject=subject,
-                    body=body,
-                    route="/v1/chat/completions",
-                    model="gpt-4",
-                )
+            (
+                results,
+                reserved_tokens,
+                reserved_spend,
+            ) = await enforcer.reserve_tokens_or_spend(
+                subject=subject,
+                body=body,
+                route="/v1/chat/completions",
+                model="gpt-4",
             )
 
             # Should check 2 limits (total_tokens and spend_usd)

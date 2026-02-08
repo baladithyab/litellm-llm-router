@@ -256,7 +256,7 @@ class TestQuotaEnforcement:
 
         Makes REQUEST_QUOTA_LIMIT requests which should all succeed,
         then makes one more which should return 429.
-        
+
         Note: If quota enforcement is not integrated or the model doesn't exist,
         all requests may return 400/500 instead. In that case, we verify the
         compose stack is working and skip the quota-specific assertions.
@@ -274,7 +274,7 @@ class TestQuotaEnforcement:
                         client, gateway_url, master_key, max_tokens=10
                     )
                     results.append(result)
-                    print(f"Request {i+1}: status={result.status_code}")
+                    print(f"Request {i + 1}: status={result.status_code}")
 
                 # Make one more request (should be rejected)
                 final_result = await make_chat_request(
@@ -288,7 +288,7 @@ class TestQuotaEnforcement:
 
         # Check if quota enforcement is active (at least one 429 response)
         has_429 = any(r.status_code == 429 for r in results)
-        
+
         if not has_429:
             # Quota enforcement may not be active or model fails before quota check
             # Verify at least the compose stack is working (non-zero responses)
@@ -305,7 +305,7 @@ class TestQuotaEnforcement:
         for i in range(REQUEST_QUOTA_LIMIT):
             # Accept any non-429 response as "allowed"
             assert results[i].status_code != 429, (
-                f"Request {i+1} was unexpectedly quota-blocked"
+                f"Request {i + 1} was unexpectedly quota-blocked"
             )
 
         # Final request should be 429
@@ -315,7 +315,9 @@ class TestQuotaEnforcement:
         )
 
         # Check Retry-After header
-        assert results[-1].retry_after is not None, "429 response should have Retry-After header"
+        assert results[-1].retry_after is not None, (
+            "429 response should have Retry-After header"
+        )
         assert results[-1].retry_after > 0
 
         # Check error response body
@@ -457,8 +459,11 @@ class TestQuotaEnforcement:
             # Should include quota info
             if "metric" in detail:
                 assert detail["metric"] in [
-                    "requests", "total_tokens", "input_tokens",
-                    "output_tokens", "spend_usd"
+                    "requests",
+                    "total_tokens",
+                    "input_tokens",
+                    "output_tokens",
+                    "spend_usd",
                 ]
 
             if "window" in detail:

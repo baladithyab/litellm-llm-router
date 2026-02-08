@@ -12,7 +12,7 @@ Tests for:
 
 import asyncio
 import os
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from fastapi import FastAPI
@@ -59,7 +59,6 @@ def app_with_health():
     """Create a minimal FastAPI app with health endpoint."""
     from litellm_llmrouter.routes import health_router
     from litellm_llmrouter.resilience import (
-        get_drain_manager,
         reset_drain_manager,
         reset_circuit_breaker_manager,
     )
@@ -87,7 +86,9 @@ class TestDBOutageSimulation:
     """Tests simulating database outages."""
 
     @pytest.mark.asyncio
-    async def test_circuit_opens_after_failures(self, fast_breaker_config: CircuitBreakerConfig):
+    async def test_circuit_opens_after_failures(
+        self, fast_breaker_config: CircuitBreakerConfig
+    ):
         """Test that circuit breaker opens after consecutive failures."""
         breaker = CircuitBreaker("database", fast_breaker_config)
 
@@ -100,7 +101,9 @@ class TestDBOutageSimulation:
         assert breaker.state == CircuitBreakerState.OPEN
 
     @pytest.mark.asyncio
-    async def test_writes_fail_fast_when_open(self, fast_breaker_config: CircuitBreakerConfig):
+    async def test_writes_fail_fast_when_open(
+        self, fast_breaker_config: CircuitBreakerConfig
+    ):
         """Test that writes fail immediately when circuit is open."""
         breaker = CircuitBreaker("database", fast_breaker_config)
 
@@ -118,7 +121,9 @@ class TestDBOutageSimulation:
         assert exc.value.time_until_retry > 0
 
     @pytest.mark.asyncio
-    async def test_cached_reads_work_when_degraded(self, cb_manager: CircuitBreakerManager):
+    async def test_cached_reads_work_when_degraded(
+        self, cb_manager: CircuitBreakerManager
+    ):
         """Test that cached/in-memory reads still work when DB is unavailable."""
         # Simulate an in-memory cache
         cache = {"key1": "cached_value1", "key2": "cached_value2"}
@@ -145,7 +150,9 @@ class TestDBOutageSimulation:
         assert result == "cached_value1"
 
     @pytest.mark.asyncio
-    async def test_recovery_after_timeout(self, fast_breaker_config: CircuitBreakerConfig):
+    async def test_recovery_after_timeout(
+        self, fast_breaker_config: CircuitBreakerConfig
+    ):
         """Test that circuit transitions to half-open after timeout."""
         breaker = CircuitBreaker("database", fast_breaker_config)
 
@@ -267,7 +274,7 @@ class TestReadinessEndpointDegradedMode:
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             response = await client.get("/_health/ready")
 
-            data = response.json()
+            response.json()  # verify parseable
             # Should not be degraded after recovery
             assert cb_manager.is_degraded() is False
 
@@ -287,9 +294,13 @@ class TestDatabaseCheckWithCircuitBreaker:
         await cb_manager.database.force_open()
 
         # Set DATABASE_URL to trigger the check
-        with patch.dict(os.environ, {"DATABASE_URL": "postgresql://test:test@localhost/test"}):
+        with patch.dict(
+            os.environ, {"DATABASE_URL": "postgresql://test:test@localhost/test"}
+        ):
             transport = ASGITransport(app=app_with_health)
-            async with AsyncClient(transport=transport, base_url="http://test") as client:
+            async with AsyncClient(
+                transport=transport, base_url="http://test"
+            ) as client:
                 response = await client.get("/_health/ready")
 
                 data = response.json()
@@ -328,7 +339,9 @@ class TestRedisCheckWithCircuitBreaker:
 
         with patch.dict(os.environ, {"REDIS_HOST": "localhost"}):
             transport = ASGITransport(app=app_with_health)
-            async with AsyncClient(transport=transport, base_url="http://test") as client:
+            async with AsyncClient(
+                transport=transport, base_url="http://test"
+            ) as client:
                 response = await client.get("/_health/ready")
 
                 data = response.json()
@@ -396,7 +409,9 @@ class TestConcurrentAccess:
     """Tests for concurrent access to circuit breakers."""
 
     @pytest.mark.asyncio
-    async def test_concurrent_failure_recording(self, fast_breaker_config: CircuitBreakerConfig):
+    async def test_concurrent_failure_recording(
+        self, fast_breaker_config: CircuitBreakerConfig
+    ):
         """Test that concurrent failure recording is thread-safe."""
         breaker = CircuitBreaker("concurrent-test", fast_breaker_config)
 
@@ -418,7 +433,9 @@ class TestConcurrentAccess:
         # The key test is that no race condition caused an error
 
     @pytest.mark.asyncio
-    async def test_concurrent_execute_calls(self, fast_breaker_config: CircuitBreakerConfig):
+    async def test_concurrent_execute_calls(
+        self, fast_breaker_config: CircuitBreakerConfig
+    ):
         """Test concurrent execute() calls are handled correctly."""
         breaker = CircuitBreaker("concurrent-exec", fast_breaker_config)
         executed_count = 0

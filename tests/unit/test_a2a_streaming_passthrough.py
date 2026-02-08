@@ -131,7 +131,9 @@ def create_jsonrpc_request(request_id: str = "1") -> Any:
 
     return JSONRPCRequest(
         method="message/stream",
-        params={"message": {"role": "user", "parts": [{"type": "text", "text": "test"}]}},
+        params={
+            "message": {"role": "user", "parts": [{"type": "text", "text": "test"}]}
+        },
         id=request_id,
     )
 
@@ -239,7 +241,9 @@ class TestRawStreamingPassthrough:
             gateway = create_a2a_gateway_with_agent()
             request = create_jsonrpc_request()
 
-            with patch("httpx.AsyncClient", return_value=MockAsyncClient(mock_response)):
+            with patch(
+                "httpx.AsyncClient", return_value=MockAsyncClient(mock_response)
+            ):
                 chunks = []
                 async for chunk in gateway._stream_agent_response_raw(
                     "test-agent", request
@@ -278,7 +282,9 @@ class TestRawStreamingPassthrough:
             gateway = create_a2a_gateway_with_agent()
             request = create_jsonrpc_request()
 
-            with patch("httpx.AsyncClient", return_value=MockAsyncClient(mock_response)):
+            with patch(
+                "httpx.AsyncClient", return_value=MockAsyncClient(mock_response)
+            ):
                 chunks = []
                 async for chunk in gateway._stream_agent_response_raw(
                     "test-agent", request
@@ -313,7 +319,9 @@ class TestRawStreamingPassthrough:
             gateway = create_a2a_gateway_with_agent()
             request = create_jsonrpc_request()
 
-            with patch("httpx.AsyncClient", return_value=MockAsyncClient(mock_response)):
+            with patch(
+                "httpx.AsyncClient", return_value=MockAsyncClient(mock_response)
+            ):
                 chunks = []
                 async for chunk in gateway._stream_agent_response_raw(
                     "test-agent", request
@@ -343,7 +351,9 @@ class TestRawStreamingPassthrough:
             gateway = create_a2a_gateway_with_agent()
             request = create_jsonrpc_request()
 
-            with patch("httpx.AsyncClient", return_value=MockAsyncClient(mock_response)):
+            with patch(
+                "httpx.AsyncClient", return_value=MockAsyncClient(mock_response)
+            ):
                 chunks = []
                 async for chunk in gateway._stream_agent_response_raw(
                     "test-agent", request
@@ -389,7 +399,9 @@ class TestBufferedStreamingCompatibility:
             gateway = create_a2a_gateway_with_agent()
             request = create_jsonrpc_request()
 
-            with patch("httpx.AsyncClient", return_value=MockAsyncClient(mock_response)):
+            with patch(
+                "httpx.AsyncClient", return_value=MockAsyncClient(mock_response)
+            ):
                 chunks = []
                 async for chunk in gateway._stream_agent_response_buffered(
                     "test-agent", request
@@ -416,7 +428,9 @@ class TestBufferedStreamingCompatibility:
             gateway = create_a2a_gateway_with_agent()
             request = create_jsonrpc_request()
 
-            with patch("httpx.AsyncClient", return_value=MockAsyncClient(mock_response)):
+            with patch(
+                "httpx.AsyncClient", return_value=MockAsyncClient(mock_response)
+            ):
                 chunks = []
                 async for chunk in gateway._stream_agent_response_buffered(
                     "test-agent", request
@@ -533,7 +547,9 @@ class TestStreamingErrorHandling:
             request = create_jsonrpc_request()
 
             chunks = []
-            async for chunk in gateway._stream_agent_response_raw("test-agent", request):
+            async for chunk in gateway._stream_agent_response_raw(
+                "test-agent", request
+            ):
                 chunks.append(chunk)
 
             assert len(chunks) == 1
@@ -603,7 +619,9 @@ class TestStreamingRegressions:
             gateway = create_a2a_gateway_with_agent()
             request = create_jsonrpc_request()
 
-            with patch("httpx.AsyncClient", return_value=MockAsyncClient(mock_response)):
+            with patch(
+                "httpx.AsyncClient", return_value=MockAsyncClient(mock_response)
+            ):
                 received_chunks = []
                 timestamps = []
 
@@ -637,7 +655,9 @@ class TestStreamingRegressions:
             gateway = create_a2a_gateway_with_agent()
             request = create_jsonrpc_request()
 
-            with patch("httpx.AsyncClient", return_value=MockAsyncClient(mock_response)):
+            with patch(
+                "httpx.AsyncClient", return_value=MockAsyncClient(mock_response)
+            ):
                 chunks = []
                 async for chunk in gateway._stream_agent_response_raw(
                     "test-agent", request
@@ -662,7 +682,9 @@ class TestStreamingRegressions:
             gateway = create_a2a_gateway_with_agent()
             request = create_jsonrpc_request()
 
-            with patch("httpx.AsyncClient", return_value=MockAsyncClient(mock_response)):
+            with patch(
+                "httpx.AsyncClient", return_value=MockAsyncClient(mock_response)
+            ):
                 chunks = []
                 async for chunk in gateway._stream_agent_response_raw(
                     "test-agent", request
@@ -722,7 +744,6 @@ class TestStreamingPerformanceCharacteristics:
                 "httpx.AsyncClient",
                 return_value=MockAsyncClient(mock_response),  # type: ignore
             ):
-
                 async for chunk in gateway._stream_agent_response_raw(
                     "test-agent", request
                 ):
@@ -730,7 +751,9 @@ class TestStreamingPerformanceCharacteristics:
 
         # Verify interleaving: first upstream chunk should be yielded
         # before second upstream chunk is received
-        assert chunks_received_order.index("downstream_chunk1") < chunks_received_order.index("upstream_2")
+        assert chunks_received_order.index(
+            "downstream_chunk1"
+        ) < chunks_received_order.index("upstream_2")
 
 
 # =============================================================================
@@ -741,7 +764,7 @@ class TestStreamingPerformanceCharacteristics:
 class TestHeaderPreservation:
     """
     Tests for upstream header preservation on streaming responses.
-    
+
     Validates that important headers like Content-Type: text/event-stream
     are preserved on streaming responses.
     """
@@ -750,15 +773,17 @@ class TestHeaderPreservation:
         """Content-Type header is preserved from upstream."""
         import httpx
         from litellm_llmrouter.a2a_gateway import filter_upstream_headers
-        
-        headers = httpx.Headers({
-            "content-type": "text/event-stream; charset=utf-8",
-            "cache-control": "no-cache",
-            "connection": "keep-alive",  # Should be stripped (hop-by-hop)
-        })
-        
+
+        headers = httpx.Headers(
+            {
+                "content-type": "text/event-stream; charset=utf-8",
+                "cache-control": "no-cache",
+                "connection": "keep-alive",  # Should be stripped (hop-by-hop)
+            }
+        )
+
         filtered = filter_upstream_headers(headers)
-        
+
         assert "content-type" in filtered
         assert filtered["content-type"] == "text/event-stream; charset=utf-8"
         assert "cache-control" in filtered
@@ -771,19 +796,19 @@ class TestHeaderPreservation:
             filter_upstream_headers,
             HOP_BY_HOP_HEADERS,
         )
-        
+
         # Build headers with all hop-by-hop headers
         header_dict = {"content-type": "text/event-stream"}
         for hop_header in HOP_BY_HOP_HEADERS:
             header_dict[hop_header] = "some-value"
-        
+
         headers = httpx.Headers(header_dict)
         filtered = filter_upstream_headers(headers)
-        
+
         # None of the hop-by-hop headers should be present
         for hop_header in HOP_BY_HOP_HEADERS:
             assert hop_header not in filtered
-        
+
         # Content-type should still be there
         assert "content-type" in filtered
 
@@ -794,14 +819,14 @@ class TestHeaderPreservation:
             filter_upstream_headers,
             UNSAFE_HEADERS,
         )
-        
+
         header_dict = {"content-type": "text/event-stream"}
         for unsafe_header in UNSAFE_HEADERS:
             header_dict[unsafe_header] = "some-value"
-        
+
         headers = httpx.Headers(header_dict)
         filtered = filter_upstream_headers(headers)
-        
+
         # None of the unsafe headers should be present
         for unsafe_header in UNSAFE_HEADERS:
             assert unsafe_header not in filtered
@@ -810,35 +835,37 @@ class TestHeaderPreservation:
         """X-Accel-Buffering header is preserved (important for nginx SSE)."""
         import httpx
         from litellm_llmrouter.a2a_gateway import filter_upstream_headers
-        
-        headers = httpx.Headers({
-            "content-type": "text/event-stream",
-            "x-accel-buffering": "no",
-        })
-        
+
+        headers = httpx.Headers(
+            {
+                "content-type": "text/event-stream",
+                "x-accel-buffering": "no",
+            }
+        )
+
         filtered = filter_upstream_headers(headers)
-        
+
         assert "x-accel-buffering" in filtered
         assert filtered["x-accel-buffering"] == "no"
 
     def test_streaming_response_meta_defaults(self):
         """StreamingResponseMeta has correct defaults."""
         from litellm_llmrouter.a2a_gateway import StreamingResponseMeta
-        
+
         meta = StreamingResponseMeta()
-        
+
         assert meta.headers == {}
         assert meta.status_code == 200
 
     def test_streaming_response_meta_with_values(self):
         """StreamingResponseMeta stores provided values."""
         from litellm_llmrouter.a2a_gateway import StreamingResponseMeta
-        
+
         meta = StreamingResponseMeta(
             headers={"content-type": "text/event-stream"},
             status_code=206,
         )
-        
+
         assert meta.headers == {"content-type": "text/event-stream"}
         assert meta.status_code == 206
 
@@ -851,7 +878,7 @@ class TestHeaderPreservation:
 class TestMethodMismatchRouting:
     """
     Tests for correct routing of message/stream to streaming endpoint.
-    
+
     Validates that invoke_agent returns an error for message/stream requests,
     directing callers to use the streaming endpoint instead.
     """
@@ -865,43 +892,60 @@ class TestMethodMismatchRouting:
             importlib.reload(gateway_module)
 
             gateway = create_a2a_gateway_with_agent()
-            
+
             # Create a message/stream request
             request = gateway_module.JSONRPCRequest(
                 method="message/stream",
-                params={"message": {"role": "user", "parts": [{"type": "text", "text": "test"}]}},
+                params={
+                    "message": {
+                        "role": "user",
+                        "parts": [{"type": "text", "text": "test"}],
+                    }
+                },
                 id="1",
             )
-            
+
             # Mock the HTTP response
-            mock_response = type("MockResponse", (), {
-                "status_code": 200,
-                "raise_for_status": lambda self: None,
-                "json": lambda self: {"result": {"status": "ok"}},
-            })()
-            
-            mock_client = type("MockClient", (), {
-                "__aenter__": lambda self: self,
-                "__aexit__": lambda self, *args: None,
-                "post": lambda self, *args, **kwargs: mock_response,
-            })()
-            
+            mock_response = type(
+                "MockResponse",
+                (),
+                {
+                    "status_code": 200,
+                    "raise_for_status": lambda self: None,
+                    "json": lambda self: {"result": {"status": "ok"}},
+                },
+            )()
+
+            mock_client = type(
+                "MockClient",
+                (),
+                {
+                    "__aenter__": lambda self: self,
+                    "__aexit__": lambda self, *args: None,
+                    "post": lambda self, *args, **kwargs: mock_response,
+                },
+            )()
+
             # Mock the async context manager
             async def mock_aenter():
                 return mock_client
-            
+
             async def mock_aexit(*args):
                 pass
-            
+
             class MockClientContext:
                 async def __aenter__(self):
                     return mock_client
+
                 async def __aexit__(self, *args):
                     pass
-            
-            with patch("litellm_llmrouter.a2a_gateway.get_client_for_request", return_value=MockClientContext()):
+
+            with patch(
+                "litellm_llmrouter.a2a_gateway.get_client_for_request",
+                return_value=MockClientContext(),
+            ):
                 response = await gateway.invoke_agent("test-agent", request)
-            
+
             # Should return an error directing to streaming endpoint
             assert response.error is not None
             assert response.error["code"] == -32600
@@ -917,7 +961,7 @@ class TestProgressiveYieldWithoutNewlines:
     """
     Tests verifying that raw streaming yields progressively even when
     upstream content has no newlines.
-    
+
     This is critical for proper SSE chunking where data may arrive
     in arbitrary boundaries.
     """
@@ -943,7 +987,9 @@ class TestProgressiveYieldWithoutNewlines:
             request = create_jsonrpc_request()
 
             # Raw mode - should yield 3 chunks
-            with patch("httpx.AsyncClient", return_value=MockAsyncClient(mock_response)):
+            with patch(
+                "httpx.AsyncClient", return_value=MockAsyncClient(mock_response)
+            ):
                 raw_chunks = []
                 async for chunk in gateway._stream_agent_response_raw(
                     "test-agent", request
@@ -969,7 +1015,7 @@ class TestProgressiveYieldWithoutNewlines:
     async def test_buffered_mode_buffers_without_newlines(self):
         """
         Buffered mode may not yield chunks without newlines.
-        
+
         This demonstrates the behavior difference between raw and buffered modes.
         In buffered mode (line iteration), content without newlines may be held.
         """
@@ -999,7 +1045,9 @@ class TestProgressiveYieldWithoutNewlines:
             request = create_jsonrpc_request()
 
             # Raw mode - should yield all 3 chunks
-            with patch("httpx.AsyncClient", return_value=MockAsyncClient(mock_response_raw)):
+            with patch(
+                "httpx.AsyncClient", return_value=MockAsyncClient(mock_response_raw)
+            ):
                 raw_chunks = []
                 async for chunk in gateway._stream_agent_response_raw(
                     "test-agent", request
@@ -1016,7 +1064,10 @@ class TestProgressiveYieldWithoutNewlines:
             request = create_jsonrpc_request()
 
             # Buffered mode - may yield fewer chunks (waits for newlines)
-            with patch("httpx.AsyncClient", return_value=MockAsyncClient(mock_response_buffered)):
+            with patch(
+                "httpx.AsyncClient",
+                return_value=MockAsyncClient(mock_response_buffered),
+            ):
                 buffered_chunks = []
                 async for chunk in gateway._stream_agent_response_buffered(
                     "test-agent", request
@@ -1025,8 +1076,8 @@ class TestProgressiveYieldWithoutNewlines:
 
         # Raw mode should have yielded 3 chunks (one-per-upstream-plan)
         assert len(raw_chunks) == 3
-        
-        #.Buffered mode should have yielded fewer chunks (depends on mock implementation)
+
+        # .Buffered mode should have yielded fewer chunks (depends on mock implementation)
         # Key assertion: compare counting when raw is chunk boundary preserving
 
 
@@ -1038,7 +1089,7 @@ class TestProgressiveYieldWithoutNewlines:
 class TestContentTypePassthrough:
     """
     Tests verifying that Content-Type header from upstream is preserved.
-    
+
     This is critical for SSE clients to properly interpret the stream.
     """
 
@@ -1046,45 +1097,51 @@ class TestContentTypePassthrough:
         """text/event-stream content-type is preserved."""
         import httpx
         from litellm_llmrouter.a2a_gateway import filter_upstream_headers
-        
-        headers = httpx.Headers({
-            "content-type": "text/event-stream",
-        })
-        
+
+        headers = httpx.Headers(
+            {
+                "content-type": "text/event-stream",
+            }
+        )
+
         filtered = filter_upstream_headers(headers)
-        
+
         assert filtered.get("content-type") == "text/event-stream"
 
     def test_json_content_type_preserved(self):
         """application/json content-type is preserved."""
         import httpx
         from litellm_llmrouter.a2a_gateway import filter_upstream_headers
-        
-        headers = httpx.Headers({
-            "content-type": "application/json; charset=utf-8",
-        })
-        
+
+        headers = httpx.Headers(
+            {
+                "content-type": "application/json; charset=utf-8",
+            }
+        )
+
         filtered = filter_upstream_headers(headers)
-        
+
         assert filtered.get("content-type") == "application/json; charset=utf-8"
 
     def test_ndjson_content_type_preserved(self):
         """application/x-ndjson content-type is preserved."""
         import httpx
         from litellm_llmrouter.a2a_gateway import filter_upstream_headers
-        
-        headers = httpx.Headers({
-            "content-type": "application/x-ndjson",
-        })
-        
+
+        headers = httpx.Headers(
+            {
+                "content-type": "application/x-ndjson",
+            }
+        )
+
         filtered = filter_upstream_headers(headers)
-        
+
         assert filtered.get("content-type") == "application/x-ndjson"
 
     def test_streaming_headers_allowlist(self):
         """Verify the allowlist contains expected streaming headers."""
         from litellm_llmrouter.a2a_gateway import STREAMING_HEADERS_TO_PRESERVE
-        
+
         # These headers are critical for SSE/streaming
         assert "content-type" in STREAMING_HEADERS_TO_PRESERVE
         assert "cache-control" in STREAMING_HEADERS_TO_PRESERVE
@@ -1094,16 +1151,18 @@ class TestContentTypePassthrough:
         """Real SSE streaming response headers are preserved correctly."""
         import httpx
         from litellm_llmrouter.a2a_gateway import filter_upstream_headers
-        
+
         # Simulate a real SSE response headers
-        sample_sse_headers = httpx.Headers({
-            'content-type': 'text/event-stream; charset=utf-8',
-            'cache-control': 'no-cache',
-            'x-accel-buffering': 'no',
-        })
-        
+        sample_sse_headers = httpx.Headers(
+            {
+                "content-type": "text/event-stream; charset=utf-8",
+                "cache-control": "no-cache",
+                "x-accel-buffering": "no",
+            }
+        )
+
         filtered = filter_upstream_headers(sample_sse_headers)
-        
-        assert filtered['content-type'] == 'text/event-stream; charset=utf-8'
-        assert filtered['cache-control'] == 'no-cache'
-        assert filtered['x-accel-buffering'] == 'no'
+
+        assert filtered["content-type"] == "text/event-stream; charset=utf-8"
+        assert filtered["cache-control"] == "no-cache"
+        assert filtered["x-accel-buffering"] == "no"

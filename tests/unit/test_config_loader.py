@@ -100,9 +100,7 @@ class TestDownloadConfigFromGCS:
     async def test_successful_download(self, tmp_path):
         local_path = str(tmp_path / "config.yaml")
         mock_gcs = MagicMock()
-        mock_gcs.download_gcs_object = AsyncMock(
-            return_value=b"model_list:\n  - gpt-4"
-        )
+        mock_gcs.download_gcs_object = AsyncMock(return_value=b"model_list:\n  - gpt-4")
 
         mock_mod = self._make_gcs_module(mock_gcs)
         with patch.dict(

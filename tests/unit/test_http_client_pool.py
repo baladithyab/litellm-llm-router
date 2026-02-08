@@ -416,7 +416,7 @@ class TestPoolWithConfiguration:
             # Verify pool can be started with these config values
             await pool_module.startup_http_client_pool()
             client = pool_module.get_http_client()
-            
+
             # Verify client is created and usable (don't check internals)
             assert client is not None
             assert isinstance(client, httpx.AsyncClient)

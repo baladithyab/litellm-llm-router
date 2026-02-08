@@ -841,9 +841,7 @@ class TestAsyncDNSResolution:
         )
 
         with pytest.raises(SSRFBlockedError) as exc_info:
-            await validate_outbound_url_async(
-                "http://127.0.0.1/api", resolve_dns=False
-            )
+            await validate_outbound_url_async("http://127.0.0.1/api", resolve_dns=False)
 
         assert "loopback" in exc_info.value.reason.lower()
 
@@ -957,13 +955,10 @@ class TestNonBlockingDNS:
         urls = [
             "https://example.com/api",  # Real domain
             "https://httpbin.org/get",  # Real domain
-            "https://api.github.com",   # Real domain
+            "https://api.github.com",  # Real domain
         ]
 
-        validation_tasks = [
-            asyncio.create_task(validate_url(url))
-            for url in urls
-        ]
+        validation_tasks = [asyncio.create_task(validate_url(url)) for url in urls]
 
         # Wait for all validations to complete (with timeout)
         try:

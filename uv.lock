@@ -1241,7 +1241,7 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.26.0" },
     { name = "hypothesis", marker = "extra == 'dev'", specifier = ">=6.100.0" },
     { name = "langfuse", marker = "extra == 'callbacks'", specifier = ">=3.0.0" },
-    { name = "litellm", specifier = ">=1.81.3" },
+    { name = "litellm", specifier = ">=1.81.3,<1.82.0" },
     { name = "litellm-llmrouter", extras = ["db", "otel", "cloud", "callbacks", "knn"], marker = "extra == 'prod'" },
     { name = "litellm-llmrouter", extras = ["dev", "db", "otel", "cloud", "knn"], marker = "extra == 'all'" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.8.0" },

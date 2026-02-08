@@ -20,9 +20,6 @@ Usage:
     uv run pytest tests/integration/test_rbac_enforcement.py -v
 """
 
-import os
-from unittest.mock import AsyncMock, MagicMock, patch
-
 import pytest
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.testclient import TestClient
@@ -45,7 +42,7 @@ def admin_api_keys():
 def rbac_test_app(admin_api_keys):
     """
     Create a test FastAPI app with RBAC-protected endpoints.
-    
+
     Uses a simplified mock of the RBAC dependency that mimics the real behavior.
     """
     from litellm_llmrouter.rbac import (
@@ -56,37 +53,31 @@ def rbac_test_app(admin_api_keys):
         has_permission,
         extract_user_permissions,
     )
-    
+
     app = FastAPI()
-    
+
     # Simulated user database (api_key -> user_info)
     user_database = {
         "user-with-mcp-server-write": {
             "user_id": "user-1",
-            "metadata": {"permissions": ["mcp.server.write"]}
+            "metadata": {"permissions": ["mcp.server.write"]},
         },
         "user-with-mcp-tool-call": {
-            "user_id": "user-2", 
-            "metadata": {"permissions": ["mcp.tool.call"]}
+            "user_id": "user-2",
+            "metadata": {"permissions": ["mcp.tool.call"]},
         },
-        "user-with-all-perms": {
-            "user_id": "superuser",
-            "permissions": "*"
-        },
-        "user-no-perms": {
-            "user_id": "user-3",
-            "metadata": {"permissions": []}
-        },
+        "user-with-all-perms": {"user_id": "superuser", "permissions": "*"},
+        "user-no-perms": {"user_id": "user-3", "metadata": {"permissions": []}},
         "user-with-mcp-wildcard": {
             "user_id": "user-4",
-            "metadata": {"permissions": ["mcp.*"]}
+            "metadata": {"permissions": ["mcp.*"]},
         },
     }
-    
+
     def create_rbac_dependency(required_permission: str):
         """Create an RBAC dependency that mimics the real implementation."""
         from fastapi import Request
-        
+
         async def rbac_check(request: Request):
             # Check for admin key first
             admin_key = request.headers.get("X-Admin-API-Key", "").strip()
@@ -94,13 +85,13 @@ def rbac_test_app(admin_api_keys):
                 auth_header = request.headers.get("Authorization", "")
                 if auth_header.startswith("Bearer "):
                     admin_key = auth_header[7:]
-            
+
             if admin_key in admin_api_keys:
                 return {
                     "is_admin": True,
                     "permissions": frozenset({PERMISSION_SUPERUSER}),
                 }
-            
+
             # Try user auth
             auth_header = request.headers.get("Authorization", "")
             if not auth_header.startswith("Bearer "):
@@ -110,12 +101,12 @@ def rbac_test_app(admin_api_keys):
                         "error": "authentication_required",
                         "message": "Valid API key required.",
                         "request_id": "test-123",
-                    }
+                    },
                 )
-            
+
             api_key = auth_header[7:]
             user_info = user_database.get(api_key)
-            
+
             if not user_info:
                 raise HTTPException(
                     status_code=401,
@@ -123,9 +114,9 @@ def rbac_test_app(admin_api_keys):
                         "error": "authentication_required",
                         "message": "Invalid API key.",
                         "request_id": "test-123",
-                    }
+                    },
                 )
-            
+
             # Check permission
             user_perms = extract_user_permissions(user_info)
             if has_permission(user_perms, required_permission):
@@ -134,7 +125,7 @@ def rbac_test_app(admin_api_keys):
                     "permissions": user_perms,
                     "user_info": user_info,
                 }
-            
+
             raise HTTPException(
                 status_code=403,
                 detail={
@@ -142,11 +133,11 @@ def rbac_test_app(admin_api_keys):
                     "message": f"Insufficient permissions. Required: {required_permission}",
                     "required_permission": required_permission,
                     "request_id": "test-123",
-                }
+                },
             )
-        
+
         return rbac_check
-    
+
     @app.post("/test/mcp/servers")
     async def create_mcp_server(
         rbac_info: dict = Depends(create_rbac_dependency(PERMISSION_MCP_SERVER_WRITE)),
@@ -157,21 +148,23 @@ def rbac_test_app(admin_api_keys):
             "rbac_info": {
                 "is_admin": rbac_info["is_admin"],
                 "permissions": list(rbac_info["permissions"]),
-            }
+            },
         }
-    
+
     @app.post("/test/tools/call")
     async def call_tool(
         rbac_info: dict = Depends(create_rbac_dependency(PERMISSION_MCP_TOOL_CALL)),
     ):
         return {"status": "invoked", "is_admin": rbac_info["is_admin"]}
-    
+
     @app.post("/test/config/reload")
     async def reload_config(
-        rbac_info: dict = Depends(create_rbac_dependency(PERMISSION_SYSTEM_CONFIG_RELOAD)),
+        rbac_info: dict = Depends(
+            create_rbac_dependency(PERMISSION_SYSTEM_CONFIG_RELOAD)
+        ),
     ):
         return {"status": "reloaded", "is_admin": rbac_info["is_admin"]}
-    
+
     return app
 
 
@@ -189,21 +182,21 @@ def client(rbac_test_app):
 class TestRBACEnforcementIntegration:
     """
     Integration tests for RBAC enforcement.
-    
+
     Validates that the RBAC dependency is correctly wired to FastAPI endpoints.
     """
 
     def test_admin_key_allows_access(self, client):
         """
         Test: Admin with valid admin API key can access protected endpoint.
-        
+
         Admin authentication bypasses permission checks entirely.
         """
         response = client.post(
             "/test/mcp/servers",
             headers={"X-Admin-API-Key": "test-admin-key-1"},
         )
-        
+
         assert response.status_code == 200
         data = response.json()
         assert data["status"] == "created"
@@ -217,7 +210,7 @@ class TestRBACEnforcementIntegration:
             "/test/mcp/servers",
             headers={"Authorization": "Bearer test-admin-key-2"},
         )
-        
+
         assert response.status_code == 200
         data = response.json()
         assert data["rbac_info"]["is_admin"] is True
@@ -230,7 +223,7 @@ class TestRBACEnforcementIntegration:
             "/test/mcp/servers",
             headers={"Authorization": "Bearer user-with-mcp-server-write"},
         )
-        
+
         assert response.status_code == 200
         data = response.json()
         assert data["status"] == "created"
@@ -245,7 +238,7 @@ class TestRBACEnforcementIntegration:
             "/test/mcp/servers",
             headers={"Authorization": "Bearer user-no-perms"},
         )
-        
+
         assert response.status_code == 403
         data = response.json()
         assert data["detail"]["error"] == "permission_denied"
@@ -260,7 +253,7 @@ class TestRBACEnforcementIntegration:
             "/test/mcp/servers",
             headers={"Authorization": "Bearer user-with-mcp-tool-call"},
         )
-        
+
         assert response.status_code == 403
 
     def test_unauthenticated_request_denied_401(self, client):
@@ -268,7 +261,7 @@ class TestRBACEnforcementIntegration:
         Test: Request without credentials gets 401 Unauthorized.
         """
         response = client.post("/test/mcp/servers")
-        
+
         assert response.status_code == 401
         data = response.json()
         assert data["detail"]["error"] == "authentication_required"
@@ -281,7 +274,7 @@ class TestRBACEnforcementIntegration:
             "/test/mcp/servers",
             headers={"Authorization": "Bearer invalid-key"},
         )
-        
+
         assert response.status_code == 401
 
     def test_superuser_can_access_all_endpoints(self, client):
@@ -294,14 +287,14 @@ class TestRBACEnforcementIntegration:
             headers={"Authorization": "Bearer user-with-all-perms"},
         )
         assert response1.status_code == 200
-        
+
         # Tool call
         response2 = client.post(
             "/test/tools/call",
             headers={"Authorization": "Bearer user-with-all-perms"},
         )
         assert response2.status_code == 200
-        
+
         # Config reload
         response3 = client.post(
             "/test/config/reload",
@@ -319,14 +312,14 @@ class TestRBACEnforcementIntegration:
             headers={"Authorization": "Bearer user-with-mcp-server-write"},
         )
         assert response1.status_code == 200
-        
+
         # But cannot access /test/tools/call (needs mcp.tool.call)
         response2 = client.post(
             "/test/tools/call",
             headers={"Authorization": "Bearer user-with-mcp-server-write"},
         )
         assert response2.status_code == 403
-        
+
         # And cannot access /test/config/reload (needs system.config.reload)
         response3 = client.post(
             "/test/config/reload",
@@ -344,14 +337,14 @@ class TestRBACEnforcementIntegration:
             headers={"Authorization": "Bearer user-with-mcp-wildcard"},
         )
         assert response1.status_code == 200
-        
-        # mcp.* should also grant access to mcp.tool.call  
+
+        # mcp.* should also grant access to mcp.tool.call
         response2 = client.post(
             "/test/tools/call",
             headers={"Authorization": "Bearer user-with-mcp-wildcard"},
         )
         assert response2.status_code == 200
-        
+
         # But NOT system.config.reload
         response3 = client.post(
             "/test/config/reload",
@@ -362,15 +355,15 @@ class TestRBACEnforcementIntegration:
 
 class TestRBACResponseFormat:
     """Test RBAC error response format."""
-    
+
     def test_401_response_format(self, client):
         """Test 401 response has correct format."""
         response = client.post("/test/mcp/servers")
-        
+
         assert response.status_code == 401
         data = response.json()
         detail = data["detail"]
-        
+
         assert "error" in detail
         assert "message" in detail
         assert "request_id" in detail
@@ -382,11 +375,11 @@ class TestRBACResponseFormat:
             "/test/mcp/servers",
             headers={"Authorization": "Bearer user-no-perms"},
         )
-        
+
         assert response.status_code == 403
         data = response.json()
         detail = data["detail"]
-        
+
         assert "error" in detail
         assert "message" in detail
         assert "required_permission" in detail
@@ -397,7 +390,7 @@ class TestRBACResponseFormat:
 class TestRBACStreamingSafety:
     """
     Test that RBAC doesn't buffer streaming responses.
-    
+
     RBAC is implemented as a FastAPI dependency, not middleware,
     so it should not affect response bodies at all.
     """
@@ -409,19 +402,23 @@ class TestRBACStreamingSafety:
         from fastapi import Request
         import asyncio
         from litellm_llmrouter.rbac import (
-            PERMISSION_MCP_SERVER_WRITE,
             PERMISSION_SUPERUSER,
         )
-        
+
         app = FastAPI()
-        
+
         async def simple_rbac_check(request: Request):
             """Simplified RBAC check for streaming test."""
             admin_key = request.headers.get("X-Admin-API-Key", "").strip()
             if admin_key in admin_api_keys:
-                return {"is_admin": True, "permissions": frozenset({PERMISSION_SUPERUSER})}
-            raise HTTPException(status_code=401, detail={"error": "authentication_required"})
-        
+                return {
+                    "is_admin": True,
+                    "permissions": frozenset({PERMISSION_SUPERUSER}),
+                }
+            raise HTTPException(
+                status_code=401, detail={"error": "authentication_required"}
+            )
+
         @app.get("/test/stream")
         async def stream_response(
             rbac_info: dict = Depends(simple_rbac_check),
@@ -431,33 +428,33 @@ class TestRBACStreamingSafety:
                 for i in range(5):
                     yield f"data: chunk-{i}\n\n"
                     await asyncio.sleep(0.01)
-            
+
             return StreamingResponse(
                 generate(),
                 media_type="text/event-stream",
                 headers={"X-RBAC-Admin": str(rbac_info["is_admin"])},
             )
-        
+
         return app
 
     def test_streaming_endpoint_not_buffered(self, streaming_app):
         """
         Test: Streaming endpoint returns correct type without buffering.
-        
+
         This is a regression test to ensure RBAC (as a dependency) doesn't
         accidentally buffer the response body.
         """
         client = TestClient(streaming_app)
-        
+
         response = client.get(
             "/test/stream",
             headers={"X-Admin-API-Key": "test-admin-key-1"},
         )
-        
+
         assert response.status_code == 200
         assert response.headers["content-type"] == "text/event-stream; charset=utf-8"
         assert response.headers["x-rbac-admin"] == "True"
-        
+
         # Check all chunks are present
         content = response.text
         for i in range(5):

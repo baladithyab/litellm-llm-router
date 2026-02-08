@@ -59,7 +59,9 @@ class TestAuditLogIntegration:
             pytest.skip("DATABASE_URL not configured")
 
         # Ensure audit is enabled
-        with patch.dict(os.environ, {"AUDIT_LOG_ENABLED": "true", "AUDIT_LOG_FAIL_MODE": "open"}):
+        with patch.dict(
+            os.environ, {"AUDIT_LOG_ENABLED": "true", "AUDIT_LOG_FAIL_MODE": "open"}
+        ):
             reset_audit_repository()
 
             # Create a unique resource ID for this test
@@ -194,7 +196,9 @@ class TestAuditDegradedMode:
             )
 
             # Mock _persist_to_db to simulate DB failure
-            with patch.object(repo, "_persist_to_db", side_effect=Exception("Connection refused")):
+            with patch.object(
+                repo, "_persist_to_db", side_effect=Exception("Connection refused")
+            ):
                 with patch("litellm_llmrouter.audit.logger") as mock_logger:
                     # Should not raise, should return True (fail-open)
                     result = await repo.write(entry)
@@ -235,7 +239,9 @@ class TestAuditDegradedMode:
             )
 
             # Mock _persist_to_db to simulate DB failure
-            with patch.object(repo, "_persist_to_db", side_effect=Exception("Connection refused")):
+            with patch.object(
+                repo, "_persist_to_db", side_effect=Exception("Connection refused")
+            ):
                 # Should raise AuditWriteError in fail-closed mode
                 with pytest.raises(AuditWriteError) as exc_info:
                     await repo.write(entry)
@@ -270,9 +276,7 @@ class TestAuditDegradedMode:
             reset_audit_repository()
 
             # Mock the repository to raise AuditWriteError
-            with patch(
-                "litellm_llmrouter.audit.get_audit_repository"
-            ) as mock_get_repo:
+            with patch("litellm_llmrouter.audit.get_audit_repository") as mock_get_repo:
                 mock_repo = AsyncMock()
                 mock_repo.is_enabled = True
                 mock_repo.write.side_effect = AuditWriteError("Database unavailable")

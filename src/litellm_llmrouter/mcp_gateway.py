@@ -82,21 +82,25 @@ class MCPTransport(str, Enum):
 
 @dataclass
 class MCPToolDefinition:
-    """Represents an MCP tool definition with input schema."""
+    """Represents an MCP tool definition with input schema and annotations."""
 
     name: str
     description: str = ""
     input_schema: dict[str, Any] = field(default_factory=dict)
     server_id: str = ""
+    annotations: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to dict for Redis storage."""
-        return {
+        result = {
             "name": self.name,
             "description": self.description,
             "input_schema": self.input_schema,
             "server_id": self.server_id,
         }
+        if self.annotations:
+            result["annotations"] = self.annotations
+        return result
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "MCPToolDefinition":
@@ -106,6 +110,7 @@ class MCPToolDefinition:
             description=data.get("description", ""),
             input_schema=data.get("input_schema", {}),
             server_id=data.get("server_id", ""),
+            annotations=data.get("annotations"),
         )
 
 
@@ -213,6 +218,8 @@ class MCPGateway:
         self.enabled = os.getenv("MCP_GATEWAY_ENABLED", "false").lower() == "true"
         # Map tool names to server IDs for quick lookup
         self._tool_to_server: dict[str, str] = {}
+        # Callbacks for tool list change notifications (MCP 2025-11-25)
+        self._on_tools_changed_callbacks: list[Any] = []
 
         # Feature flag for remote tool invocation (disabled by default for security)
         self._tool_invocation_enabled = (
@@ -380,6 +387,20 @@ class MCPGateway:
         with self._lock:
             return len(self.servers)
 
+    def on_tools_changed(self, callback: Any) -> None:
+        """Register a callback for tool list change notifications."""
+        self._on_tools_changed_callbacks.append(callback)
+
+    def _notify_tools_changed(self) -> None:
+        """Fire tool list change notification to all registered callbacks."""
+        for callback in self._on_tools_changed_callbacks:
+            try:
+                callback()
+            except Exception as e:
+                verbose_proxy_logger.warning(
+                    f"MCP: Error in tools_changed callback: {e}"
+                )
+
     def is_enabled(self) -> bool:
         """Check if MCP gateway is enabled."""
         return self.enabled
@@ -441,6 +462,10 @@ class MCPGateway:
             f"{' [HA synced]' if self._ha_sync_enabled else ''}"
         )
 
+        # Notify listeners about tool list change
+        if server.tools:
+            self._notify_tools_changed()
+
     def unregister_server(self, server_id: str) -> bool:
         """
         Unregister an MCP server from the gateway.
@@ -466,6 +491,9 @@ class MCPGateway:
                 self._delete_server_from_redis(server_id)
 
             verbose_proxy_logger.info(f"MCP: Unregistered server {server_id}")
+
+            # Notify listeners about tool list change
+            self._notify_tools_changed()
             return True
         return False
 

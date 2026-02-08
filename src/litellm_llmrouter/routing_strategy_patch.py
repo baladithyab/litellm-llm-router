@@ -141,7 +141,14 @@ def create_patched_get_available_deployment(original_method: Callable) -> Callab
     """
     Create a patched version of get_available_deployment that uses LLMRouterStrategyFamily
     for llmrouter-* strategies, with pipeline routing support for A/B testing.
+
+    Includes a defensive guard: if the same request_id is routed more than
+    MAX_ROUTING_ATTEMPTS times, short-circuit to prevent LiteLLM's 38x request
+    amplification bug (#17329).
     """
+    # Per-request routing attempt counter {request_id: count}
+    _routing_attempts: Dict[str, int] = {}
+    MAX_ROUTING_ATTEMPTS = 3
 
     @functools.wraps(original_method)
     def patched_get_available_deployment(
@@ -152,6 +159,29 @@ def create_patched_get_available_deployment(original_method: Callable) -> Callab
         specific_deployment: Optional[bool] = False,
         request_kwargs: Optional[Dict] = None,
     ):
+        # Defensive guard: detect routing amplification
+        req_id = None
+        if request_kwargs:
+            req_id = request_kwargs.get("request_id") or request_kwargs.get(
+                "litellm_call_id"
+            )
+        if req_id:
+            attempts = _routing_attempts.get(req_id, 0) + 1
+            _routing_attempts[req_id] = attempts
+            if attempts > MAX_ROUTING_ATTEMPTS:
+                logger.error(
+                    f"Routing amplification detected for request {req_id}: "
+                    f"{attempts} attempts (max {MAX_ROUTING_ATTEMPTS}). "
+                    f"Short-circuiting to prevent 38x amplification bug (#17329)."
+                )
+                raise RuntimeError(
+                    f"Routing amplification guard: {attempts} routing attempts "
+                    f"for request {req_id} exceeds limit of {MAX_ROUTING_ATTEMPTS}"
+                )
+            # Cleanup old entries (simple bounded dict)
+            if len(_routing_attempts) > 10000:
+                _routing_attempts.clear()
+
         # Check if we're using an llmrouter strategy
         if hasattr(self, "_llmrouter_strategy") and self._llmrouter_strategy:
             # Try pipeline routing first if enabled

@@ -35,3 +35,12 @@ def shared_span_exporter():
     _shared_exporter.clear()
     yield _shared_exporter
     _shared_exporter.clear()
+
+
+@pytest.fixture(autouse=True)
+def _reset_observability_singleton():
+    """Reset observability and metrics singletons between tests."""
+    yield
+    from litellm_llmrouter.observability import reset_observability_manager
+
+    reset_observability_manager()

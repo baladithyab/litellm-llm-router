@@ -78,13 +78,15 @@ def _configure_middleware(app: FastAPI) -> None:
     Load order:
     1. RequestIDMiddleware - Request correlation (outermost)
     2. PolicyMiddleware - OPA-style policy enforcement (ASGI level)
-    3. RouterDecisionMiddleware - Telemetry for routing decisions
+    3. PluginMiddleware - Plugin on_request/on_response hooks
+    4. RouterDecisionMiddleware - Telemetry for routing decisions
 
     Args:
         app: The FastAPI application instance
     """
     from ..auth import RequestIDMiddleware
     from ..router_decision_callback import register_router_decision_middleware
+    from .plugin_middleware import PluginMiddleware
 
     # Request ID middleware - should be outermost for correlation
     app.add_middleware(RequestIDMiddleware)
@@ -95,6 +97,12 @@ def _configure_middleware(app: FastAPI) -> None:
     # Enables denial before streaming begins, no response buffering
     if add_policy_middleware(app):
         logger.info("Added PolicyMiddleware (policy enforcement enabled)")
+
+    # Plugin middleware - hooks for on_request/on_response
+    # Starlette creates the instance lazily; __init__ self-registers
+    # as the module singleton so plugin startup can call set_plugins().
+    app.add_middleware(PluginMiddleware)
+    logger.debug("Added PluginMiddleware (plugins wired during startup)")
 
     # Router decision telemetry middleware - emits TG4.1 router.* span attributes
     if register_router_decision_middleware(app):
@@ -186,7 +194,11 @@ def _register_routes(app: FastAPI, include_admin: bool = True) -> None:
 
 async def _run_plugin_startup(app: FastAPI) -> None:
     """
-    Run plugin startup hooks.
+    Run plugin startup hooks, then wire middleware and callback bridges.
+
+    After plugins are started, this function:
+    1. Identifies plugins with on_request/on_response hooks → PluginMiddleware
+    2. Identifies plugins with on_llm_* hooks → PluginCallbackBridge
 
     Args:
         app: The FastAPI application instance
@@ -196,6 +208,8 @@ async def _run_plugin_startup(app: FastAPI) -> None:
         Exception: If any plugin with failure_mode=abort fails during startup
     """
     from .plugin_manager import get_plugin_manager, PluginDependencyError
+    from .plugin_middleware import get_plugin_middleware
+    from .plugin_callback_bridge import register_callback_bridge
 
     manager = get_plugin_manager()
 
@@ -215,16 +229,43 @@ async def _run_plugin_startup(app: FastAPI) -> None:
         logger.error(f"Plugin startup error: {e}")
         raise
 
+    # Wire middleware-capable plugins into PluginMiddleware
+    middleware_plugins = manager.get_middleware_plugins()
+    plugin_mw = get_plugin_middleware()
+    if plugin_mw and middleware_plugins:
+        plugin_mw.set_plugins(middleware_plugins)
+        logger.info(
+            f"Wired {len(middleware_plugins)} middleware plugins into PluginMiddleware"
+        )
+
+    # Wire callback-capable plugins into LiteLLM via PluginCallbackBridge
+    callback_plugins = manager.get_callback_plugins()
+    if callback_plugins:
+        bridge = register_callback_bridge(callback_plugins)
+        if bridge:
+            logger.info(f"Wired {len(callback_plugins)} callback plugins into LiteLLM")
+
 
 async def _run_plugin_shutdown(app: FastAPI) -> None:
     """
-    Run plugin shutdown hooks.
+    Run plugin shutdown hooks and clean up bridges.
 
     Args:
         app: The FastAPI application instance
     """
     from .plugin_manager import get_plugin_manager
+    from .plugin_middleware import get_plugin_middleware
+    from .plugin_callback_bridge import reset_callback_bridge
 
+    # Clear middleware plugins first (stop intercepting new requests)
+    plugin_mw = get_plugin_middleware()
+    if plugin_mw:
+        plugin_mw.set_plugins([])
+
+    # Clear callback bridge
+    reset_callback_bridge()
+
+    # Then run plugin shutdown hooks
     manager = get_plugin_manager()
     await manager.shutdown(app)
 

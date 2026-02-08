@@ -13,12 +13,13 @@ Security Notes:
 """
 
 import json
+import logging
 import os
 import pickle
 import threading
 import time
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import tempfile
 import yaml
@@ -44,6 +45,11 @@ from litellm_llmrouter.telemetry_contracts import (
 
 # Import TG4.1 router decision span attributes helper
 from litellm_llmrouter.observability import set_router_decision_attributes
+
+# Import routing strategy base class for CostAwareRoutingStrategy
+from litellm_llmrouter.strategy_registry import RoutingContext, RoutingStrategy
+
+logger = logging.getLogger(__name__)
 
 try:
     from opentelemetry import trace
@@ -448,6 +454,8 @@ LLMROUTER_STRATEGIES = [
     "llmrouter-largest",  # LargestLLM - Always picks largest
     # Custom routers
     "llmrouter-custom",  # User-defined custom router
+    # Cost-aware routers
+    "llmrouter-cost-aware",  # CostAwareRoutingStrategy - cheapest adequate model
 ]
 
 
@@ -508,6 +516,12 @@ DEFAULT_ROUTER_HPARAMS: Dict[str, Dict[str, Any]] = {
     },
     "smallest": {},
     "largest": {},
+    "cost-aware": {
+        "quality_threshold": 0.7,
+        "cost_weight": 0.7,
+        "inner_strategy": None,
+        "max_cost_per_1k_tokens": None,
+    },
 }
 
 
@@ -1045,6 +1059,240 @@ class LLMRouterStrategyFamily:
             verbose_proxy_logger.error(f"Routing error (no observability): {e}")
 
         return selected_model
+
+
+class CostAwareRoutingStrategy(RoutingStrategy):
+    """
+    Selects the cheapest model that meets a quality threshold.
+
+    Algorithm:
+    1. For each candidate deployment, look up model cost from litellm.model_cost
+    2. Optionally predict quality score using an inner/delegate strategy
+    3. Filter candidates meeting the quality threshold
+    4. Select cheapest from filtered set (using combined score)
+    5. If no candidates meet threshold, fall back to best-quality selection
+
+    Configuration:
+        quality_threshold: Minimum acceptable quality score (0.0-1.0, default 0.7)
+        cost_weight: How much to weight cost vs quality (0.0=quality only,
+                     1.0=cost only, default 0.7)
+        inner_strategy: Name of inner strategy for quality prediction (optional)
+        max_cost_per_1k_tokens: Hard cap on per-request cost (optional)
+    """
+
+    def __init__(
+        self,
+        quality_threshold: float = 0.7,
+        cost_weight: float = 0.7,
+        inner_strategy: Optional[RoutingStrategy] = None,
+        max_cost_per_1k_tokens: Optional[float] = None,
+    ):
+        self._quality_threshold = max(0.0, min(1.0, quality_threshold))
+        self._cost_weight = max(0.0, min(1.0, cost_weight))
+        self._inner_strategy = inner_strategy
+        self._max_cost_per_1k_tokens = max_cost_per_1k_tokens
+
+    @property
+    def name(self) -> str:
+        return "llmrouter-cost-aware"
+
+    @property
+    def version(self) -> Optional[str]:
+        return "1.0.0"
+
+    def _get_model_cost(self, model: str) -> float:
+        """Get average cost per 1K tokens for a model.
+
+        Looks up input and output cost from litellm.model_cost and returns
+        the average. Returns inf for unknown models so they sort last.
+
+        Args:
+            model: Model identifier (e.g., 'gpt-4', 'claude-3-opus')
+
+        Returns:
+            Average cost per 1K tokens in USD
+        """
+        try:
+            import litellm
+
+            cost_info = litellm.model_cost.get(model, {})
+            input_cost = cost_info.get("input_cost_per_token", 0) * 1000
+            output_cost = cost_info.get("output_cost_per_token", 0) * 1000
+            avg_cost = (input_cost + output_cost) / 2
+            return avg_cost if avg_cost > 0 else float("inf")
+        except Exception:
+            return float("inf")
+
+    def _predict_quality(
+        self,
+        context: RoutingContext,
+        deployment: Dict,
+    ) -> float:
+        """Predict quality score for a deployment.
+
+        If an inner strategy is configured, delegates to it and returns
+        1.0 if it selects this deployment, 0.5 otherwise.
+        Without an inner strategy, returns 1.0 for all candidates
+        (effectively making this a pure cost optimizer).
+
+        Args:
+            context: Routing context with request details
+            deployment: Candidate deployment dict
+
+        Returns:
+            Quality score between 0.0 and 1.0
+        """
+        if self._inner_strategy is None:
+            return 1.0
+
+        try:
+            selected = self._inner_strategy.select_deployment(context)
+            if selected is None:
+                return 0.5
+            selected_model = selected.get("litellm_params", {}).get("model", "")
+            candidate_model = deployment.get("litellm_params", {}).get("model", "")
+            return 1.0 if selected_model == candidate_model else 0.5
+        except Exception:
+            return 0.5
+
+    def _get_candidates(self, context: RoutingContext) -> List[Dict]:
+        """Get candidate deployments from the router.
+
+        Args:
+            context: Routing context with router and model info
+
+        Returns:
+            List of deployment dicts matching the requested model
+        """
+        router = context.router
+        healthy = getattr(router, "healthy_deployments", router.model_list)
+        return [dep for dep in healthy if dep.get("model_name") == context.model]
+
+    def _compute_combined_score(
+        self,
+        quality: float,
+        normalized_cost: float,
+    ) -> float:
+        """Compute combined quality-cost score.
+
+        score = (1 - cost_weight) * quality + cost_weight * (1 - normalized_cost)
+
+        Higher score is better. When cost_weight=1.0, only cost matters.
+        When cost_weight=0.0, only quality matters.
+
+        Args:
+            quality: Quality score (0.0-1.0, higher is better)
+            normalized_cost: Normalized cost (0.0-1.0, lower is cheaper)
+
+        Returns:
+            Combined score (higher is better)
+        """
+        return (1 - self._cost_weight) * quality + self._cost_weight * (
+            1 - normalized_cost
+        )
+
+    def select_deployment(
+        self,
+        context: RoutingContext,
+    ) -> Optional[Dict]:
+        """Select the cheapest deployment meeting the quality threshold.
+
+        Args:
+            context: Routing context with request details
+
+        Returns:
+            Selected deployment dict, or None if no candidates
+        """
+        candidates = self._get_candidates(context)
+        if not candidates:
+            return None
+
+        if len(candidates) == 1:
+            return candidates[0]
+
+        # Score each candidate: (deployment, cost_per_1k, quality)
+        scored: List[Tuple[Dict, float, float]] = []
+        for deployment in candidates:
+            model = deployment.get("litellm_params", {}).get("model", "")
+            cost_per_1k = self._get_model_cost(model)
+            quality = self._predict_quality(context, deployment)
+
+            # Apply hard cost cap
+            if (
+                self._max_cost_per_1k_tokens is not None
+                and cost_per_1k > self._max_cost_per_1k_tokens
+            ):
+                continue
+
+            scored.append((deployment, cost_per_1k, quality))
+
+        if not scored:
+            # All candidates exceeded cost cap; fall back to best quality
+            return self._select_best_quality(candidates, context)
+
+        # Filter to candidates meeting quality threshold
+        above_threshold = [
+            (dep, cost, qual)
+            for dep, cost, qual in scored
+            if qual >= self._quality_threshold
+        ]
+
+        if not above_threshold:
+            # No candidate meets quality threshold; fall back to best quality
+            return self._select_best_quality(candidates, context)
+
+        # Normalize costs for combined scoring
+        costs = [cost for _, cost, _ in above_threshold]
+        min_cost = min(costs)
+        max_cost = max(costs)
+        cost_range = max_cost - min_cost if max_cost > min_cost else 1.0
+
+        best_deployment = None
+        best_score = -1.0
+
+        for dep, cost, qual in above_threshold:
+            normalized_cost = (cost - min_cost) / cost_range if cost_range > 0 else 0.0
+            combined = self._compute_combined_score(qual, normalized_cost)
+            if combined > best_score:
+                best_score = combined
+                best_deployment = dep
+
+        return best_deployment
+
+    def _select_best_quality(
+        self,
+        candidates: List[Dict],
+        context: RoutingContext,
+    ) -> Optional[Dict]:
+        """Fall back to selecting the best-quality candidate.
+
+        If an inner strategy is configured, delegates to it.
+        Otherwise, returns the first candidate.
+
+        Args:
+            candidates: List of candidate deployments
+            context: Routing context
+
+        Returns:
+            Best quality deployment, or first candidate as fallback
+        """
+        if self._inner_strategy is not None:
+            try:
+                selected = self._inner_strategy.select_deployment(context)
+                if selected is not None:
+                    return selected
+            except Exception:
+                pass
+
+        return candidates[0] if candidates else None
+
+    def validate(self) -> Tuple[bool, Optional[str]]:
+        """Validate the strategy is ready to serve requests."""
+        if self._quality_threshold < 0 or self._quality_threshold > 1:
+            return False, "quality_threshold must be between 0.0 and 1.0"
+        if self._cost_weight < 0 or self._cost_weight > 1:
+            return False, "cost_weight must be between 0.0 and 1.0"
+        return True, None
 
 
 def register_llmrouter_strategies():

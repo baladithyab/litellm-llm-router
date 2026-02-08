@@ -63,6 +63,45 @@ logger = logging.getLogger(__name__)
 
 
 # =============================================================================
+# LLM API Path Registry
+# =============================================================================
+
+LLM_API_PATHS: dict[str, str] = {
+    "/v1/chat/completions": "chat_completion",
+    "/chat/completions": "chat_completion",
+    "/v1/responses": "responses",
+    "/responses": "responses",
+    "/openai/v1/responses": "responses",
+    "/v1/embeddings": "embedding",
+    "/embeddings": "embedding",
+    "/v1/completions": "completion",
+    "/completions": "completion",
+}
+"""Maps LLM API request paths to their API type identifier."""
+
+
+def get_api_type_for_path(path: str) -> str | None:
+    """Return the API type for a given request path, or None if not an LLM path."""
+    return LLM_API_PATHS.get(path)
+
+
+def extract_model_from_body(body: dict[str, Any], api_type: str | None) -> str | None:
+    """
+    Extract the model name from a parsed request body based on API type.
+
+    Different API surfaces place the model field in different locations:
+    - chat_completion / completion / embedding: body["model"]
+    - responses: body["model"] (same key, different body shape)
+
+    The model key is ``"model"`` across all current OpenAI-compatible surfaces,
+    but this function is structured for easy extension if that changes.
+    """
+    if not isinstance(body, dict):
+        return None
+    return body.get("model")
+
+
+# =============================================================================
 # Configuration
 # =============================================================================
 
@@ -156,6 +195,9 @@ class PolicyContext:
 
     # Model (for LLM routes)
     model: str | None = None
+
+    # API type (chat_completion, responses, embedding, completion)
+    api_type: str | None = None
 
     # Request metadata
     source_ip: str | None = None
@@ -631,7 +673,6 @@ class PolicyMiddleware:
             return
 
         path = scope.get("path", "")
-        scope.get("method", "GET")
 
         # Skip if policy engine is disabled
         if not self._engine.is_enabled:
@@ -643,8 +684,27 @@ class PolicyMiddleware:
             await self.app(scope, receive, send)
             return
 
-        # Build context from ASGI scope
-        context = self._build_context(scope)
+        # Buffer request body for LLM routes so we can extract the model
+        api_type = get_api_type_for_path(path)
+        body_bytes: bytes = b""
+        if api_type is not None:
+            body_chunks: list[bytes] = []
+            while True:
+                message = await receive()
+                body_chunks.append(message.get("body", b""))
+                if not message.get("more_body", False):
+                    break
+            body_bytes = b"".join(body_chunks)
+
+        # Build context from ASGI scope (with parsed body when available)
+        parsed_body: dict[str, Any] | None = None
+        if body_bytes:
+            try:
+                parsed_body = json.loads(body_bytes)
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                parsed_body = None
+
+        context = self._build_context(scope, api_type=api_type, parsed_body=parsed_body)
 
         # Evaluate policy
         decision = await self._engine.evaluate(context)
@@ -656,11 +716,41 @@ class PolicyMiddleware:
             await self._audit_denial(decision)
             return
 
-        # Policy allowed - proceed with request
-        await self.app(scope, receive, send)
+        # Policy allowed - replay the buffered body to downstream app
+        if body_bytes:
+            # Create a replay receive callable so the downstream sees the body
+            body_sent = False
 
-    def _build_context(self, scope: Scope) -> PolicyContext:
-        """Build PolicyContext from ASGI scope."""
+            async def replay_receive() -> dict[str, Any]:
+                nonlocal body_sent
+                if not body_sent:
+                    body_sent = True
+                    return {
+                        "type": "http.request",
+                        "body": body_bytes,
+                        "more_body": False,
+                    }
+                # After replaying, delegate to the original receive
+                return await receive()
+
+            await self.app(scope, replay_receive, send)
+        else:
+            await self.app(scope, receive, send)
+
+    def _build_context(
+        self,
+        scope: Scope,
+        *,
+        api_type: str | None = None,
+        parsed_body: dict[str, Any] | None = None,
+    ) -> PolicyContext:
+        """Build PolicyContext from ASGI scope.
+
+        Args:
+            scope: ASGI scope dict.
+            api_type: Detected API surface type (chat_completion, responses, etc.).
+            parsed_body: Parsed JSON body for LLM routes (used for model extraction).
+        """
         path = scope.get("path", "")
         method = scope.get("method", "GET")
 
@@ -700,11 +790,13 @@ class PolicyMiddleware:
         if not user_id:
             user_id = headers.get("x-user-id")
 
-        # Extract model from request body for LLM routes
-        # NOTE: For streaming, we don't want to buffer the body
-        # Could use Content-Type check and read if it's JSON, but this
-        # requires care. For now, model extraction from body is optional.
-        model = headers.get("x-model")  # Optional header hint
+        # Extract model: prefer body-based extraction for LLM routes, fall back
+        # to the X-Model header hint.
+        model = None
+        if parsed_body is not None and api_type is not None:
+            model = extract_model_from_body(parsed_body, api_type)
+        if model is None:
+            model = headers.get("x-model")  # Optional header hint
 
         return PolicyContext(
             team_id=team_id,
@@ -713,6 +805,7 @@ class PolicyMiddleware:
             route=path,
             method=method,
             model=model,
+            api_type=api_type,
             source_ip=source_ip,
             headers=headers,
             request_id=request_id,
@@ -872,6 +965,10 @@ AUDIT_ACTION_POLICY_ERROR = "policy.evaluation.error"
 # =============================================================================
 
 __all__ = [
+    # LLM API path registry
+    "LLM_API_PATHS",
+    "get_api_type_for_path",
+    "extract_model_from_body",
     # Config functions
     "is_policy_engine_enabled",
     "is_policy_fail_closed",

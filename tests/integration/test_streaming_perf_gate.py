@@ -35,7 +35,6 @@ import shutil
 import subprocess
 import time
 from dataclasses import dataclass, field
-from typing import AsyncIterator
 
 import httpx
 import pytest
@@ -58,7 +57,9 @@ INTERVAL_MS = float(os.getenv("STREAMING_PERF_INTERVAL_MS", "100"))
 TTFB_MAX_MS = float(os.getenv("STREAMING_PERF_TTFB_MAX_MS", "500"))
 
 # Derived values
-TOTAL_STREAM_DURATION_MS = MARKER_COUNT * INTERVAL_MS  # Expected ~2000ms for 20 markers @ 100ms
+TOTAL_STREAM_DURATION_MS = (
+    MARKER_COUNT * INTERVAL_MS
+)  # Expected ~2000ms for 20 markers @ 100ms
 
 # URLs for compose services
 STUB_URL = "http://localhost:9200"
@@ -260,7 +261,9 @@ async def stream_request(
                 # Parse marker
                 try:
                     marker = json.loads(line)
-                    marker_index = marker.get("params", {}).get("marker_index", result.marker_count)
+                    marker_index = marker.get("params", {}).get(
+                        "marker_index", result.marker_count
+                    )
                 except json.JSONDecodeError:
                     marker_index = result.marker_count
 
@@ -299,8 +302,7 @@ async def run_concurrent_streams(
                 return await stream_request(client, url, request_id)
 
     tasks = [
-        asyncio.create_task(bounded_request(f"req-{i}"))
-        for i in range(concurrency)
+        asyncio.create_task(bounded_request(f"req-{i}")) for i in range(concurrency)
     ]
     return await asyncio.gather(*tasks)
 
@@ -339,7 +341,9 @@ class TestStreamingPerfGate:
 
         # All requests should succeed
         successful = [r for r in results if r.error is None]
-        assert len(successful) == len(results), f"Some requests failed: {[r.error for r in results if r.error]}"
+        assert len(successful) == len(results), (
+            f"Some requests failed: {[r.error for r in results if r.error]}"
+        )
 
         # Check TTFB (should be very low for direct stub access)
         ttfbs = [r.ttfb_ms for r in successful]
@@ -347,11 +351,15 @@ class TestStreamingPerfGate:
         max_ttfb = max(ttfbs)
 
         print(f"\n📊 Stub Direct - TTFB: avg={avg_ttfb:.1f}ms, max={max_ttfb:.1f}ms")
-        assert max_ttfb < TTFB_MAX_MS, f"TTFB too high: {max_ttfb:.1f}ms > {TTFB_MAX_MS}ms"
+        assert max_ttfb < TTFB_MAX_MS, (
+            f"TTFB too high: {max_ttfb:.1f}ms > {TTFB_MAX_MS}ms"
+        )
 
         # Check marker counts
         for r in successful:
-            assert r.marker_count >= MARKER_COUNT - 1, f"Missing markers: got {r.marker_count}"
+            assert r.marker_count >= MARKER_COUNT - 1, (
+                f"Missing markers: got {r.marker_count}"
+            )
 
         # Check cadence
         for r in successful:
@@ -390,7 +398,9 @@ class TestStreamingPerfGate:
 
         # All requests should succeed
         successful = [r for r in results if r.error is None]
-        assert len(successful) == len(results), f"Some requests failed: {[r.error for r in results if r.error]}"
+        assert len(successful) == len(results), (
+            f"Some requests failed: {[r.error for r in results if r.error]}"
+        )
 
         # TTFB Assertion: Must be < total_duration / 3
         # This catches buffering that would delay first byte
@@ -400,7 +410,9 @@ class TestStreamingPerfGate:
         max_ttfb = max(ttfbs)
 
         print(f"\n📊 Gateway Streaming - Concurrency: {CONCURRENCY}")
-        print(f"   TTFB: avg={avg_ttfb:.1f}ms, max={max_ttfb:.1f}ms (threshold: {ttfb_threshold_ms:.1f}ms)")
+        print(
+            f"   TTFB: avg={avg_ttfb:.1f}ms, max={max_ttfb:.1f}ms (threshold: {ttfb_threshold_ms:.1f}ms)"
+        )
 
         assert max_ttfb < ttfb_threshold_ms, (
             f"TTFB too high (possible buffering): {max_ttfb:.1f}ms > {ttfb_threshold_ms:.1f}ms"
@@ -423,7 +435,9 @@ class TestStreamingPerfGate:
         avg_total = sum(total_times) / len(total_times)
         expected_min = TOTAL_STREAM_DURATION_MS * 0.8  # Allow 20% variance
 
-        print(f"   Total time: avg={avg_total:.1f}ms (expected ~{TOTAL_STREAM_DURATION_MS:.1f}ms)")
+        print(
+            f"   Total time: avg={avg_total:.1f}ms (expected ~{TOTAL_STREAM_DURATION_MS:.1f}ms)"
+        )
         assert avg_total >= expected_min, (
             f"Stream completed too fast (markers may be missing): {avg_total:.1f}ms < {expected_min:.1f}ms"
         )
@@ -452,7 +466,7 @@ class TestStreamingPerfGate:
         success_rate = len(successful) / len(results)
 
         print(f"\n📊 High Concurrency ({high_concurrency})")
-        print(f"   Success rate: {success_rate*100:.1f}%")
+        print(f"   Success rate: {success_rate * 100:.1f}%")
 
         assert success_rate >= 0.95, (
             f"Too many failures under load: {len(results) - len(successful)} / {len(results)}"
@@ -464,7 +478,9 @@ class TestStreamingPerfGate:
             max_ttfb = max(ttfbs)
             ttfb_threshold_ms = (TOTAL_STREAM_DURATION_MS / 3) * 2  # 2x threshold
 
-            print(f"   TTFB max: {max_ttfb:.1f}ms (threshold: {ttfb_threshold_ms:.1f}ms)")
+            print(
+                f"   TTFB max: {max_ttfb:.1f}ms (threshold: {ttfb_threshold_ms:.1f}ms)"
+            )
             assert max_ttfb < ttfb_threshold_ms, (
                 f"TTFB degraded under load: {max_ttfb:.1f}ms > {ttfb_threshold_ms:.1f}ms"
             )

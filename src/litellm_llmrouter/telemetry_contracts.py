@@ -96,6 +96,9 @@ class RouterDecisionInput:
     team_id: Optional[str] = None
     """Team identifier for multi-tenant scenarios."""
 
+    api_type: Optional[str] = None
+    """API surface type: chat_completion, responses, embedding, completion."""
+
     request_metadata: Dict[str, Any] = field(default_factory=dict)
     """Additional safe metadata (no PII)."""
 
@@ -155,6 +158,9 @@ class RoutingOutcomeData:
 
     total_tokens: Optional[int] = None
     """Total tokens used (if available after completion)."""
+
+    api_type: Optional[str] = None
+    """API surface type: chat_completion, responses, embedding, completion."""
 
 
 @dataclass
@@ -310,6 +316,7 @@ class RouterDecisionEventBuilder:
         user_id: Optional[str] = None,
         team_id: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
+        api_type: Optional[str] = None,
     ) -> "RouterDecisionEventBuilder":
         """Set input context (PII-safe)."""
         self._event.input = RouterDecisionInput(
@@ -317,6 +324,7 @@ class RouterDecisionEventBuilder:
             query_length=query_length,
             user_id=user_id,
             team_id=team_id,
+            api_type=api_type,
             request_metadata=metadata or {},
         )
         return self
@@ -376,6 +384,7 @@ class RouterDecisionEventBuilder:
         input_tokens: Optional[int] = None,
         output_tokens: Optional[int] = None,
         total_tokens: Optional[int] = None,
+        api_type: Optional[str] = None,
     ) -> "RouterDecisionEventBuilder":
         """Set outcome data."""
         self._event.outcome = RoutingOutcomeData(
@@ -385,6 +394,7 @@ class RouterDecisionEventBuilder:
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             total_tokens=total_tokens,
+            api_type=api_type,
         )
         return self
 
@@ -504,6 +514,7 @@ def extract_router_decision_from_span_event(
                 query_length=inp.get("query_length", 0),
                 user_id=inp.get("user_id"),
                 team_id=inp.get("team_id"),
+                api_type=inp.get("api_type"),
                 request_metadata=inp.get("request_metadata", {}),
             )
 
@@ -536,6 +547,7 @@ def extract_router_decision_from_span_event(
                 input_tokens=o.get("input_tokens"),
                 output_tokens=o.get("output_tokens"),
                 total_tokens=o.get("total_tokens"),
+                api_type=o.get("api_type"),
             )
 
         if "fallback" in data:

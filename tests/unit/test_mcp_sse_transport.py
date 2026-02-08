@@ -167,21 +167,24 @@ class TestTransportMode:
 
     def test_get_transport_mode_sse_enabled(self):
         """get_transport_mode returns 'sse' when SSE is enabled."""
-        with patch(
-            "litellm_llmrouter.mcp_sse_transport.MCP_SSE_TRANSPORT_ENABLED", True
-        ), patch("litellm_llmrouter.mcp_sse_transport.MCP_SSE_LEGACY_MODE", False):
+        with (
+            patch(
+                "litellm_llmrouter.mcp_sse_transport.MCP_SSE_TRANSPORT_ENABLED", True
+            ),
+            patch("litellm_llmrouter.mcp_sse_transport.MCP_SSE_LEGACY_MODE", False),
+        ):
             from litellm_llmrouter.mcp_sse_transport import get_transport_mode
 
             # Need to reload to get fresh values
-            assert get_transport_mode.__module__ == "litellm_llmrouter.mcp_sse_transport"
+            assert (
+                get_transport_mode.__module__ == "litellm_llmrouter.mcp_sse_transport"
+            )
 
     def test_get_transport_mode_legacy(self):
         """get_transport_mode returns 'legacy' when legacy mode is set."""
         from litellm_llmrouter.mcp_sse_transport import get_transport_mode
 
-        with patch(
-            "litellm_llmrouter.mcp_sse_transport.MCP_SSE_LEGACY_MODE", True
-        ):
+        with patch("litellm_llmrouter.mcp_sse_transport.MCP_SSE_LEGACY_MODE", True):
             # The function reads module-level constants, so we need to check behavior
             # This test verifies the function exists and returns expected types
             mode = get_transport_mode()
@@ -282,7 +285,9 @@ class TestSSEEndpoint:
             data = response.json()
             assert data["detail"]["error"] == "mcp_gateway_disabled"
 
-    @pytest.mark.skip(reason="SSE streaming test requires special async handling - headers validation covered by integration test")
+    @pytest.mark.skip(
+        reason="SSE streaming test requires special async handling - headers validation covered by integration test"
+    )
     def test_sse_returns_stream_response(self, client, mock_gateway):
         """GET /mcp/sse returns streaming response with correct headers."""
         with patch(
@@ -296,8 +301,14 @@ class TestSSEEndpoint:
                 headers={"Accept": "text/event-stream"},
             ) as response:
                 # The response should start streaming with correct headers
-                assert response.headers.get("content-type") == "text/event-stream; charset=utf-8"
-                assert response.headers.get("cache-control") == "no-cache, no-store, must-revalidate"
+                assert (
+                    response.headers.get("content-type")
+                    == "text/event-stream; charset=utf-8"
+                )
+                assert (
+                    response.headers.get("cache-control")
+                    == "no-cache, no-store, must-revalidate"
+                )
                 assert response.headers.get("x-accel-buffering") == "no"
 
     @pytest.mark.skip(reason="SSE streaming test requires special async handling")
@@ -419,7 +430,7 @@ class TestSSEMessagesEndpoint:
 
             data = response.json()
             assert "error" in data
-            assert data["error"]["code"] == -32002
+            assert data["error"]["code"] == -32004
 
 
 # ============================================================================
@@ -490,11 +501,12 @@ class TestLegacyModeRollback:
 
     def test_sse_disabled_in_legacy_mode(self, app, mock_gateway):
         """SSE endpoints return 404 when in legacy mode."""
-        with patch(
-            "litellm_llmrouter.mcp_sse_transport.MCP_SSE_LEGACY_MODE", True
-        ), patch(
-            "litellm_llmrouter.mcp_sse_transport.get_mcp_gateway",
-            return_value=mock_gateway,
+        with (
+            patch("litellm_llmrouter.mcp_sse_transport.MCP_SSE_LEGACY_MODE", True),
+            patch(
+                "litellm_llmrouter.mcp_sse_transport.get_mcp_gateway",
+                return_value=mock_gateway,
+            ),
         ):
             client = TestClient(app)
             response = client.get(
@@ -528,7 +540,9 @@ class TestLegacyModeRollback:
 class TestSSETransportIntegration:
     """Integration-style tests for SSE transport behavior."""
 
-    @pytest.mark.skip(reason="SSE streaming test requires special async handling - hangs in TestClient")
+    @pytest.mark.skip(
+        reason="SSE streaming test requires special async handling - hangs in TestClient"
+    )
     def test_sse_initial_event_format(self, client, mock_gateway):
         """SSE stream starts with session.created event."""
         with patch(
@@ -601,12 +615,14 @@ class TestFeatureFlagEnvironment:
         with patch.dict(os.environ, {}, clear=False):
             # Default should be "true"
             from litellm_llmrouter.mcp_sse_transport import MCP_SSE_TRANSPORT_ENABLED
+
             # The constant is set at import time, so we verify it's True as designed
             assert MCP_SSE_TRANSPORT_ENABLED is True
 
     def test_default_legacy_mode_off(self):
         """Legacy mode is off by default."""
         from litellm_llmrouter.mcp_sse_transport import MCP_SSE_LEGACY_MODE
+
         assert MCP_SSE_LEGACY_MODE is False
 
 
@@ -707,7 +723,10 @@ class TestSessionIsolation:
     async def test_session_expiration(self):
         """SSESession.is_expired checks against timeout."""
         import time
-        from litellm_llmrouter.mcp_sse_transport import SSESession, MCP_SSE_SESSION_TIMEOUT
+        from litellm_llmrouter.mcp_sse_transport import (
+            SSESession,
+            MCP_SSE_SESSION_TIMEOUT,
+        )
 
         session = SSESession(session_id="test-expire-session")
 

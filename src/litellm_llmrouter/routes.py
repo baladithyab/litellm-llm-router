@@ -427,6 +427,61 @@ async def readiness_probe():
 
 
 # =============================================================================
+# A2A Agent Card Discovery (/.well-known/agent.json)
+# =============================================================================
+# These are unauthenticated endpoints per the A2A specification.
+# They enable agent discovery by returning Agent Card metadata.
+
+
+@health_router.get("/.well-known/agent.json")
+async def get_gateway_agent_card():
+    """
+    Return the gateway-level A2A Agent Card.
+
+    This is a public discovery endpoint per the A2A specification.
+    No authentication required.
+
+    Returns the gateway's Agent Card with capabilities, skills (derived
+    from registered agents), and authentication requirements.
+    """
+    from .a2a_gateway import get_a2a_gateway
+
+    gateway = get_a2a_gateway()
+
+    base_url = os.getenv("A2A_BASE_URL", "")
+
+    return gateway.get_gateway_agent_card(base_url=base_url)
+
+
+@health_router.get("/.well-known/agents/{agent_id}.json")
+async def get_agent_card_by_id(agent_id: str):
+    """
+    Return the A2A Agent Card for a specific registered agent.
+
+    This is a public discovery endpoint per the A2A specification.
+    No authentication required.
+
+    Args:
+        agent_id: The ID of the agent to get the card for.
+    """
+    from .a2a_gateway import get_a2a_gateway
+
+    gateway = get_a2a_gateway()
+    card = gateway.get_agent_card(agent_id)
+
+    if card is None:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error": "agent_not_found",
+                "message": f"Agent '{agent_id}' not found",
+            },
+        )
+
+    return card
+
+
+# =============================================================================
 # A2A Gateway Convenience Endpoints (/a2a/agents)
 # =============================================================================
 # These are thin wrappers around LiteLLM's global_agent_registry for convenience.

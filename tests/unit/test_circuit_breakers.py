@@ -12,7 +12,6 @@ Tests for:
 
 import asyncio
 import os
-import time
 from unittest.mock import patch
 
 import pytest
@@ -282,7 +281,9 @@ class TestCircuitBreakerSlidingWindow:
     """Tests for sliding window failure tracking."""
 
     @pytest.mark.asyncio
-    async def test_failures_in_window_are_counted(self, breaker_config: CircuitBreakerConfig):
+    async def test_failures_in_window_are_counted(
+        self, breaker_config: CircuitBreakerConfig
+    ):
         """Test that failures within window are counted."""
         config = CircuitBreakerConfig(
             failure_threshold=5,
@@ -546,6 +547,7 @@ class TestExecuteWithCircuitBreaker:
     @pytest.mark.asyncio
     async def test_execute_success(self, breaker: CircuitBreaker):
         """Test successful execution."""
+
         async def operation():
             return "success"
 
@@ -555,6 +557,7 @@ class TestExecuteWithCircuitBreaker:
     @pytest.mark.asyncio
     async def test_execute_failure(self, breaker: CircuitBreaker):
         """Test execution failure is propagated."""
+
         async def operation():
             raise ValueError("operation failed")
 
@@ -578,7 +581,9 @@ class TestExecuteWithCircuitBreaker:
         assert result == "fallback value"
 
     @pytest.mark.asyncio
-    async def test_execute_raises_without_fallback_when_open(self, breaker: CircuitBreaker):
+    async def test_execute_raises_without_fallback_when_open(
+        self, breaker: CircuitBreaker
+    ):
         """Test CircuitBreakerOpenError is raised without fallback."""
         await breaker.force_open()
 
@@ -607,12 +612,11 @@ class TestExecuteWithCircuitBreaker:
     @pytest.mark.asyncio
     async def test_execute_with_args_and_kwargs(self, breaker: CircuitBreaker):
         """Test passing arguments to the operation."""
+
         async def operation(a, b, c=None):
             return f"{a}-{b}-{c}"
 
-        result = await execute_with_circuit_breaker(
-            breaker, operation, "x", "y", c="z"
-        )
+        result = await execute_with_circuit_breaker(breaker, operation, "x", "y", c="z")
         assert result == "x-y-z"
 
 

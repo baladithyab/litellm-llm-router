@@ -1,8 +1,11 @@
 # AWS Distro for OpenTelemetry (ADOT) Collector Configuration
-# Exports traces to AWS X-Ray via CloudWatch
+# Exports traces, metrics, and logs to AWS backends
 #
 # Usage: Mount this file to /etc/otel-config.yaml in the ADOT collector container
-# Requires IAM permissions for xray:PutTraceSegments, xray:PutTelemetryRecords
+# Requires IAM permissions:
+#   Traces:  xray:PutTraceSegments, xray:PutTelemetryRecords
+#   Metrics: cloudwatch:PutMetricData
+#   Logs:    logs:CreateLogGroup, logs:CreateLogStream, logs:PutLogEvents
 
 receivers:
   otlp:
@@ -17,6 +20,16 @@ processors:
     timeout: 1s
     send_batch_size: 50
 
+  # Batch processor tuned for metrics (less frequent export)
+  batch/metrics:
+    timeout: 60s
+    send_batch_size: 100
+
+  # Batch processor for logs
+  batch/logs:
+    timeout: 5s
+    send_batch_size: 100
+
   # Add resource attributes
   resource:
     attributes:
@@ -28,11 +41,22 @@ processors:
         action: upsert
 
 exporters:
-  # AWS X-Ray exporter
+  # AWS X-Ray exporter for traces
   awsxray:
     region: ${AWS_REGION:-us-east-1}
-    # Uses IAM Instance Profile on EC2 - no explicit credentials needed
-    # For local dev, uses ~/.aws/credentials or env vars
+
+  # AWS CloudWatch Metrics exporter
+  awsemf:
+    region: ${AWS_REGION:-us-east-1}
+    namespace: RouteIQ/Gateway
+    log_group_name: /routeiq/metrics
+    dimension_rollup_option: NoDimensionRollup
+
+  # AWS CloudWatch Logs exporter
+  awscloudwatchlogs:
+    region: ${AWS_REGION:-us-east-1}
+    log_group_name: /routeiq/gateway
+    log_stream_name: ${HOSTNAME:-default}
 
 # Debug exporter for troubleshooting (optional)
 # logging:
@@ -44,3 +68,13 @@ service:
       receivers: [otlp]
       processors: [batch, resource]
       exporters: [awsxray]
+
+    metrics:
+      receivers: [otlp]
+      processors: [batch/metrics, resource]
+      exporters: [awsemf]
+
+    logs:
+      receivers: [otlp]
+      processors: [batch/logs, resource]
+      exporters: [awscloudwatchlogs]

@@ -368,17 +368,19 @@ def docker_compose_up() -> bool:
 
     # Environment for HA leader election
     env = os.environ.copy()
-    env.update({
-        "LITELLM_MASTER_KEY": HA_MASTER_KEY,
-        "POSTGRES_PASSWORD": HA_POSTGRES_PASSWORD,
-        "POSTGRES_USER": HA_POSTGRES_USER,
-        "POSTGRES_DB": HA_POSTGRES_DB,
-        # Enable leader election mode
-        "LLMROUTER_HA_MODE": "leader_election",
-        # Faster lease times for quicker failover testing
-        "LLMROUTER_CONFIG_SYNC_LEASE_SECONDS": "15",
-        "LLMROUTER_CONFIG_SYNC_RENEW_INTERVAL_SECONDS": "5",
-    })
+    env.update(
+        {
+            "LITELLM_MASTER_KEY": HA_MASTER_KEY,
+            "POSTGRES_PASSWORD": HA_POSTGRES_PASSWORD,
+            "POSTGRES_USER": HA_POSTGRES_USER,
+            "POSTGRES_DB": HA_POSTGRES_DB,
+            # Enable leader election mode
+            "LLMROUTER_HA_MODE": "leader_election",
+            # Faster lease times for quicker failover testing
+            "LLMROUTER_CONFIG_SYNC_LEASE_SECONDS": "15",
+            "LLMROUTER_CONFIG_SYNC_RENEW_INTERVAL_SECONDS": "5",
+        }
+    )
 
     try:
         result = subprocess.run(
@@ -514,7 +516,9 @@ def ha_stack() -> Generator[bool, None, None]:
         return
 
     # Wait for PostgreSQL
-    print(f"[HA Failover] Waiting for PostgreSQL at {HA_POSTGRES_HOST}:{HA_POSTGRES_PORT}...")
+    print(
+        f"[HA Failover] Waiting for PostgreSQL at {HA_POSTGRES_HOST}:{HA_POSTGRES_PORT}..."
+    )
     if not wait_for_postgres_healthy():
         print("[HA Failover] PostgreSQL did not become healthy")
         print(f"[HA Failover] Postgres logs:\n{docker_compose_logs('postgres')}")
@@ -532,8 +536,12 @@ def ha_stack() -> Generator[bool, None, None]:
         timeout=DOCKER_STARTUP_TIMEOUT,
     )
     if not gateway1_healthy:
-        print(f"[HA Failover] Gateway 1 did not become healthy within {DOCKER_STARTUP_TIMEOUT}s")
-        print(f"[HA Failover] Gateway 1 logs:\n{docker_compose_logs('litellm-gateway-1')}")
+        print(
+            f"[HA Failover] Gateway 1 did not become healthy within {DOCKER_STARTUP_TIMEOUT}s"
+        )
+        print(
+            f"[HA Failover] Gateway 1 logs:\n{docker_compose_logs('litellm-gateway-1')}"
+        )
         docker_compose_down()
         yield False
         return
@@ -545,8 +553,10 @@ def ha_stack() -> Generator[bool, None, None]:
         timeout=60,  # Shorter timeout since stack is already up
     )
     if not gateway2_healthy:
-        print(f"[HA Failover] Gateway 2 did not become healthy")
-        print(f"[HA Failover] Gateway 2 logs:\n{docker_compose_logs('litellm-gateway-2')}")
+        print("[HA Failover] Gateway 2 did not become healthy")
+        print(
+            f"[HA Failover] Gateway 2 logs:\n{docker_compose_logs('litellm-gateway-2')}"
+        )
         docker_compose_down()
         yield False
         return
@@ -817,7 +827,7 @@ class TestHALeaderFailover:
         assert stop_success, f"Failed to stop container {leader_container}"
 
         # Wait for new leader
-        print(f"[HA Failover] Waiting for new leader after graceful stop...")
+        print("[HA Failover] Waiting for new leader after graceful stop...")
         new_leader_id = None
         start_time = time.time()
 
@@ -858,7 +868,7 @@ class TestHALeaderFailover:
         failure_count = 0
         total_requests = 0
 
-        print(f"[HA Failover] Testing LB availability during failover...")
+        print("[HA Failover] Testing LB availability during failover...")
         print(f"[HA Failover] Killing leader container: {leader_container}")
 
         # Kill the leader
@@ -884,7 +894,9 @@ class TestHALeaderFailover:
 
             time.sleep(0.5)  # 2 requests per second
 
-        success_rate = (success_count / total_requests * 100) if total_requests > 0 else 0
+        success_rate = (
+            (success_count / total_requests * 100) if total_requests > 0 else 0
+        )
         print(
             f"[HA Failover] Results: {success_count}/{total_requests} successful "
             f"({success_rate:.1f}%)"
@@ -995,8 +1007,7 @@ class TestHALeaderElectionDetails:
                 pass
 
         assert len(leaders) <= 1, (
-            f"Multiple gateways report as leader: {leaders}. "
-            "Split-brain detected!"
+            f"Multiple gateways report as leader: {leaders}. Split-brain detected!"
         )
         if len(leaders) == 1:
             print(f"[HA Failover] Single leader verified: {leaders[0]}")

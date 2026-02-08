@@ -30,7 +30,6 @@ import pytest
 from ._otel_compose_helpers import (
     COMPOSE_CMD,
     REQUIRED_ROUTER_ATTRIBUTES,
-    ROUTER_DECISION_ATTRIBUTES,
     JaegerQueryClient,
     OTelTestConfig,
     otel_compose_stack,
@@ -76,15 +75,15 @@ requires_docker_env = pytest.mark.skipif(
 def otel_stack():
     """
     Module-scoped fixture that boots the OTel compose stack.
-    
+
     Guarantees cleanup on both success and failure via context manager.
     """
     if COMPOSE_CMD is None:
         pytest.skip("finch or docker CLI not found")
-    
+
     if not os.path.exists(CONFIG.compose_file):
         pytest.fail(f"Compose file not found: {CONFIG.compose_file}")
-    
+
     with otel_compose_stack(CONFIG) as (stack, jaeger):
         yield {"stack": stack, "jaeger": jaeger, "config": CONFIG}
 
@@ -103,7 +102,7 @@ def make_chat_request(
 ) -> httpx.Response:
     """
     Make a chat completion request to the gateway.
-    
+
     Note: Uses a model likely not configured, which will fail at routing
     but should still emit router decision traces.
     """
@@ -111,13 +110,13 @@ def make_chat_request(
         "Authorization": f"Bearer {master_key}",
         "Content-Type": "application/json",
     }
-    
+
     body = {
         "model": model,
         "messages": [{"role": "user", "content": message}],
         "max_tokens": max_tokens,
     }
-    
+
     return httpx.post(
         f"{gateway_url}/v1/chat/completions",
         headers=headers,
@@ -142,7 +141,7 @@ def make_health_request(gateway_url: str, master_key: str) -> httpx.Response:
 class TestOTelE2EValidation:
     """
     End-to-end tests for OpenTelemetry integration.
-    
+
     These tests boot a full compose stack with Jaeger and verify that:
     1. Gateway requests produce traces in Jaeger
     2. Router decision attributes from TG4.1 are present in spans
@@ -151,17 +150,17 @@ class TestOTelE2EValidation:
     def test_gateway_emits_traces_to_jaeger(self, otel_stack: dict):
         """
         Test that the gateway emits at least one trace to Jaeger.
-        
+
         This validates the basic OTel → Jaeger pipeline is working.
         """
         config: OTelTestConfig = otel_stack["config"]
         jaeger: JaegerQueryClient = otel_stack["jaeger"]
-        
+
         # Make a request to generate traces
         print(f"\n📤 Making health request to {config.gateway_url}...")
         resp = make_health_request(config.gateway_url, config.master_key)
         print(f"Health response: {resp.status_code}")
-        
+
         # Wait for the service to appear in Jaeger
         print(f"⏳ Waiting for service '{config.service_name}' in Jaeger...")
         service_found = jaeger.wait_for_service(
@@ -169,7 +168,7 @@ class TestOTelE2EValidation:
             timeout=config.trace_timeout,
             poll_interval=config.poll_interval,
         )
-        
+
         if not service_found:
             # Get available services for debugging
             try:
@@ -177,29 +176,29 @@ class TestOTelE2EValidation:
                 print(f"Available services in Jaeger: {services}")
             except Exception as e:
                 print(f"Could not get services: {e}")
-            
+
             pytest.fail(
                 f"Service '{config.service_name}' did not appear in Jaeger "
                 f"within {config.trace_timeout}s. "
                 "Check OTEL_EXPORTER_OTLP_ENDPOINT configuration."
             )
-        
+
         # Verify we can query traces
         traces = jaeger.get_traces(config.service_name, limit=10)
         assert len(traces) >= 0, "Should be able to query traces from Jaeger"
-        
+
         print(f"✅ Found {len(traces)} trace(s) for {config.service_name}")
 
     def test_chat_request_produces_traces(self, otel_stack: dict):
         """
         Test that a chat completion request produces traces in Jaeger.
-        
+
         Even if the request fails (model not found, etc.), the gateway
         should emit traces with router decision metadata.
         """
         config: OTelTestConfig = otel_stack["config"]
         jaeger: JaegerQueryClient = otel_stack["jaeger"]
-        
+
         # Make a chat request (may fail but should produce traces)
         print(f"\n📤 Making chat request to {config.gateway_url}...")
         try:
@@ -212,16 +211,17 @@ class TestOTelE2EValidation:
             print(f"Chat response: {resp.status_code}")
         except Exception as e:
             print(f"Chat request error (expected if model unavailable): {e}")
-        
+
         # Wait for traces to appear
         print("⏳ Waiting for traces...")
         import time
+
         time.sleep(5)  # Give OTel exporter time to flush
-        
+
         # Query traces
         traces = jaeger.get_traces(config.service_name, limit=20)
         print(f"Found {len(traces)} trace(s)")
-        
+
         # Should have at least one trace from the request
         assert len(traces) >= 1, (
             f"Expected at least 1 trace from chat request, got {len(traces)}"
@@ -230,21 +230,21 @@ class TestOTelE2EValidation:
     def test_router_decision_attributes_present(self, otel_stack: dict):
         """
         Test that router decision attributes from TG4.1 are present in traces.
-        
+
         Per TG4.1 acceptance criteria:
         - router.strategy: strategy name (knn, mlp, random, simple-shuffle)
         - router.model_selected: selected model/deployment
         - router.candidates_evaluated: count of evaluated candidates
         - router.decision_outcome: outcome of the routing decision
-        
+
         This test MUST NOT skip - it deterministically asserts TG4.1 attributes.
         The RouterDecisionCallback ensures attributes are emitted for all strategies.
         """
         config: OTelTestConfig = otel_stack["config"]
         jaeger: JaegerQueryClient = otel_stack["jaeger"]
-        
+
         # Make a request to trigger routing
-        print(f"\n📤 Making chat request to trigger routing...")
+        print("\n📤 Making chat request to trigger routing...")
         try:
             resp = make_chat_request(
                 config.gateway_url,
@@ -256,10 +256,10 @@ class TestOTelE2EValidation:
         except Exception as e:
             # Request failure is expected (mock API keys), but trace should still be emitted
             print(f"Request error (expected): {e}")
-        
+
         # Wait and then query traces
         print("⏳ Waiting for traces with router attributes...")
-        
+
         # Look for any router.* attribute
         trace = jaeger.wait_for_trace_with_attribute(
             config.service_name,
@@ -267,7 +267,7 @@ class TestOTelE2EValidation:
             timeout=config.trace_timeout,
             poll_interval=config.poll_interval,
         )
-        
+
         # Deterministic assertion - NO SKIP
         if trace is None:
             # Collect debug info for failure message
@@ -283,7 +283,7 @@ class TestOTelE2EValidation:
                 )
             else:
                 debug_info = "\nNo traces found in Jaeger"
-            
+
             pytest.fail(
                 f"TG4.1 VALIDATION FAILED: No traces with 'router.strategy' attribute found "
                 f"within {config.trace_timeout}s. "
@@ -291,18 +291,18 @@ class TestOTelE2EValidation:
                 f"Check LLMROUTER_ROUTER_CALLBACK_ENABLED=true is set in docker-compose.otel.yml"
                 f"{debug_info}"
             )
-        
+
         # Validate the trace has required attributes
         is_valid, found_attrs = validate_router_decision_trace(trace)
-        
+
         print(f"✅ Found router decision attributes: {found_attrs}")
-        
+
         # Assert minimum required attributes
         assert is_valid, (
             f"TG4.1 VALIDATION FAILED: Trace missing required router attributes. "
             f"Found: {found_attrs}, Required: {REQUIRED_ROUTER_ATTRIBUTES}"
         )
-        
+
         # Additional assertion: verify the strategy name matches expected
         attrs = trace.get_span_attributes()
         strategy = attrs.get("router.strategy", "")
@@ -312,13 +312,13 @@ class TestOTelE2EValidation:
     def test_trace_contains_span_with_router_prefix(self, otel_stack: dict):
         """
         Test that at least one span contains a router.* prefixed attribute.
-        
+
         This is a more relaxed check that validates the TG4.1 instrumentation
         is wired up, even if not all attributes are populated.
         """
         config: OTelTestConfig = otel_stack["config"]
         jaeger: JaegerQueryClient = otel_stack["jaeger"]
-        
+
         # Make request
         try:
             make_chat_request(
@@ -328,23 +328,24 @@ class TestOTelE2EValidation:
             )
         except Exception:
             pass
-        
+
         # Wait for traces
         import time
+
         time.sleep(5)
-        
+
         # Check for any router.* attribute
         traces = jaeger.get_traces(config.service_name, limit=30)
-        
+
         router_attrs_found = set()
         for trace in traces:
             attrs = trace.get_span_attributes()
             for key in attrs.keys():
                 if key.startswith("router."):
                     router_attrs_found.add(key)
-        
+
         print(f"Router attributes across all traces: {router_attrs_found}")
-        
+
         # Document what's available for debugging
         if router_attrs_found:
             print(f"✅ TG4.1 router attributes detected: {router_attrs_found}")
@@ -357,18 +358,18 @@ class TestOTelE2EValidation:
 
 
 @requires_compose
-@requires_docker_env  
+@requires_docker_env
 class TestOTelComposeStackLifecycle:
     """
     Tests for compose stack lifecycle management.
-    
+
     These verify that the stack starts up correctly and Jaeger is accessible.
     """
 
     def test_jaeger_is_accessible(self, otel_stack: dict):
         """Test that Jaeger API is accessible."""
         jaeger: JaegerQueryClient = otel_stack["jaeger"]
-        
+
         services = jaeger.get_services()
         assert isinstance(services, list), "Should return list of services"
         print(f"✅ Jaeger accessible, services: {services}")
@@ -376,9 +377,10 @@ class TestOTelComposeStackLifecycle:
     def test_gateway_health_endpoint(self, otel_stack: dict):
         """Test that gateway health endpoint responds."""
         config: OTelTestConfig = otel_stack["config"]
-        
+
         # Retry with longer timeout for potentially slow gateway
         import time
+
         for attempt in range(3):
             try:
                 headers = {"Authorization": f"Bearer {config.master_key}"}
@@ -390,11 +392,13 @@ class TestOTelComposeStackLifecycle:
                 if resp.status_code == 200:
                     print(f"✅ Gateway healthy: {resp.json()}")
                     return
-                print(f"⚠️ Health check attempt {attempt + 1}: status {resp.status_code}")
+                print(
+                    f"⚠️ Health check attempt {attempt + 1}: status {resp.status_code}"
+                )
             except httpx.TimeoutException:
                 print(f"⚠️ Health check timeout on attempt {attempt + 1}")
             time.sleep(2)
-        
+
         pytest.fail("Gateway health check failed after 3 attempts")
 
 

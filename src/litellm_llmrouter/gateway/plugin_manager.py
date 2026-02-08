@@ -70,6 +70,7 @@ from typing import TYPE_CHECKING, Any, Callable
 
 if TYPE_CHECKING:
     from fastapi import FastAPI
+    from .plugin_middleware import PluginRequest, PluginResponse, ResponseMetadata
 
 logger = logging.getLogger(__name__)
 
@@ -110,6 +111,15 @@ class PluginCapability(Enum):
 
     STORAGE_BACKEND = "storage_backend"
     """Plugin provides storage capabilities."""
+
+    GUARDRAIL = "guardrail"
+    """Plugin provides content security guardrails."""
+
+    CACHE = "cache"
+    """Plugin provides response caching."""
+
+    COST_TRACKER = "cost_tracker"
+    """Plugin provides cost tracking and reconciliation."""
 
 
 class FailureMode(Enum):
@@ -188,9 +198,18 @@ class GatewayPlugin(ABC):
     Plugins must implement startup() and shutdown() hooks.
     Both methods receive the FastAPI application instance and a PluginContext.
 
-    Optional hooks:
-    - on_request(request): Called before each request is processed
-    - on_response(request, response): Called after each response is generated
+    Optional ASGI-level hooks (wired via PluginMiddleware):
+    - on_request(request): Called before each HTTP request is processed.
+      Return None to pass through, or PluginResponse to short-circuit.
+    - on_response(request, response_meta): Called after each response is sent.
+      Receives status + headers only (no body) to preserve streaming.
+
+    Optional LLM lifecycle hooks (wired via PluginCallbackBridge):
+    - on_llm_pre_call(model, messages, kwargs): Before LLM API call
+    - on_llm_success(model, response, kwargs): After successful LLM call
+    - on_llm_failure(model, exception, kwargs): After failed LLM call
+
+    Other optional hooks:
     - health_check(): Called during readiness checks to report plugin health
 
     Legacy Compatibility:
@@ -263,6 +282,160 @@ class GatewayPlugin(ABC):
         """
         return {"status": "ok"}
 
+    # =========================================================================
+    # ASGI-level request/response hooks (wired via PluginMiddleware)
+    # =========================================================================
+
+    async def on_request(self, request: "PluginRequest") -> "PluginResponse | None":
+        """
+        Called before each HTTP request is processed.
+
+        Override to inspect requests, enforce policies, or short-circuit responses.
+
+        Args:
+            request: Parsed request metadata (method, path, headers, etc.)
+
+        Returns:
+            None to pass the request through to the next plugin/handler,
+            or a PluginResponse to short-circuit with a direct response.
+        """
+        return None
+
+    async def on_response(
+        self,
+        request: "PluginRequest",
+        response: "ResponseMetadata",
+    ) -> None:
+        """
+        Called after each HTTP response is fully sent.
+
+        Override to log, track costs, update caches, emit metrics, etc.
+        Called in reverse plugin order (symmetric wrapping with on_request).
+
+        Note: Only receives status + headers, not body, to preserve streaming.
+
+        Args:
+            request: The original request metadata
+            response: Response metadata (status_code, headers, duration_ms)
+        """
+        pass
+
+    # =========================================================================
+    # LLM lifecycle hooks (wired via PluginCallbackBridge)
+    # =========================================================================
+
+    async def on_llm_pre_call(
+        self, model: str, messages: list[Any], kwargs: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        """
+        Called before an LLM API call is made.
+
+        Override to inspect/modify call parameters, add metadata, or block calls.
+
+        Args:
+            model: The model being called (e.g., 'gpt-4', 'claude-3-opus')
+            messages: The messages list being sent
+            kwargs: Additional call parameters
+
+        Returns:
+            None to pass through unchanged, or a dict of kwargs overrides
+            to merge into the call parameters.
+        """
+        return None
+
+    async def on_llm_success(
+        self, model: str, response: Any, kwargs: dict[str, Any]
+    ) -> None:
+        """
+        Called after a successful LLM API call.
+
+        Override to log responses, track costs, update metrics, cache results, etc.
+
+        Args:
+            model: The model that was called
+            response: The LLM response object
+            kwargs: The call parameters that were used
+        """
+        pass
+
+    async def on_llm_failure(
+        self, model: str, exception: Exception, kwargs: dict[str, Any]
+    ) -> None:
+        """
+        Called after a failed LLM API call.
+
+        Override to log errors, update circuit breakers, emit alerts, etc.
+
+        Args:
+            model: The model that was called
+            exception: The exception that occurred
+            kwargs: The call parameters that were used
+        """
+        pass
+
+    # =========================================================================
+    # Configuration and infrastructure hooks
+    # =========================================================================
+
+    async def on_config_reload(
+        self, old_config: dict[str, Any], new_config: dict[str, Any]
+    ) -> None:
+        """
+        Called when gateway configuration is reloaded.
+
+        Override to react to configuration changes (e.g., update thresholds,
+        reload rules, adjust behavior).
+
+        Args:
+            old_config: The previous configuration dict
+            new_config: The new configuration dict
+        """
+        pass
+
+    async def on_route_register(self, route_path: str, methods: list[str]) -> None:
+        """
+        Called when a new route is registered.
+
+        Override to track registered routes, add route-specific behavior, etc.
+
+        Args:
+            route_path: The URL path of the registered route
+            methods: HTTP methods for the route (e.g., ["GET", "POST"])
+        """
+        pass
+
+    async def on_model_health_change(
+        self, model: str, healthy: bool, reason: str
+    ) -> None:
+        """
+        Called when a model's health status changes.
+
+        Override to react to model health transitions (e.g., adjust routing,
+        emit alerts, update dashboards).
+
+        Args:
+            model: The model identifier
+            healthy: Whether the model is now healthy
+            reason: Human-readable reason for the health change
+        """
+        pass
+
+    async def on_circuit_breaker_change(
+        self, breaker_name: str, old_state: str, new_state: str
+    ) -> None:
+        """
+        Called when a circuit breaker changes state.
+
+        Override to react to circuit breaker transitions (e.g., emit alerts,
+        adjust routing weights, update dashboards).
+
+        Args:
+            breaker_name: Name of the circuit breaker (e.g., "database", "redis")
+            old_state: Previous state ("closed", "open", "half_open")
+            new_state: New state ("closed", "open", "half_open")
+        """
+        pass
+
 
 class NoOpPlugin(GatewayPlugin):
     """
@@ -322,6 +495,7 @@ class PluginManager:
 
     def __init__(self) -> None:
         self._plugins: list[GatewayPlugin] = []
+        self._sorted_plugins: list[GatewayPlugin] | None = None  # Cached topo order
         self._quarantined: set[str] = set()  # Plugin names that failed and are disabled
         self._started = False
         self._context: PluginContext | None = None
@@ -705,9 +879,10 @@ class PluginManager:
 
         self._started = True
 
-        # Sort plugins by dependencies and priority
+        # Sort plugins by dependencies and priority, cache for get_*_plugins()
         try:
             sorted_plugins = self._topological_sort(self._plugins)
+            self._sorted_plugins = sorted_plugins
         except PluginDependencyError as e:
             logger.error(f"Plugin dependency resolution failed: {e}")
             raise
@@ -788,6 +963,125 @@ class PluginManager:
     def is_started(self) -> bool:
         """Return whether startup() has been called."""
         return self._started
+
+    def get_middleware_plugins(self) -> list[GatewayPlugin]:
+        """
+        Return plugins that override on_request or on_response.
+
+        These are the plugins that should be wired into PluginMiddleware.
+        Plugins are returned in topological sort order (dependency + priority).
+
+        Returns:
+            List of plugins with middleware hooks, in dependency order
+        """
+        source = (
+            self._sorted_plugins if self._sorted_plugins is not None else self._plugins
+        )
+        middleware_plugins = []
+        for plugin in source:
+            if plugin.name in self._quarantined:
+                continue
+            # Check if the plugin overrides on_request or on_response
+            has_on_request = type(plugin).on_request is not GatewayPlugin.on_request
+            has_on_response = type(plugin).on_response is not GatewayPlugin.on_response
+            if has_on_request or has_on_response:
+                middleware_plugins.append(plugin)
+        return middleware_plugins
+
+    def get_callback_plugins(self) -> list[GatewayPlugin]:
+        """
+        Return plugins that override LLM lifecycle hooks.
+
+        These are the plugins that should be wired into PluginCallbackBridge.
+        Plugins are returned in topological sort order (dependency + priority).
+
+        Returns:
+            List of plugins with LLM callback hooks, in dependency order
+        """
+        source = (
+            self._sorted_plugins if self._sorted_plugins is not None else self._plugins
+        )
+        callback_plugins = []
+        for plugin in source:
+            if plugin.name in self._quarantined:
+                continue
+            has_pre = type(plugin).on_llm_pre_call is not GatewayPlugin.on_llm_pre_call
+            has_success = (
+                type(plugin).on_llm_success is not GatewayPlugin.on_llm_success
+            )
+            has_failure = (
+                type(plugin).on_llm_failure is not GatewayPlugin.on_llm_failure
+            )
+            if has_pre or has_success or has_failure:
+                callback_plugins.append(plugin)
+        return callback_plugins
+
+    def get_guardrail_plugins(self) -> list[GatewayPlugin]:
+        """
+        Get plugins with GUARDRAIL capability.
+
+        Returns:
+            List of plugins declaring the GUARDRAIL capability,
+            excluding quarantined plugins, in topological sort order.
+        """
+        source = (
+            self._sorted_plugins if self._sorted_plugins is not None else self._plugins
+        )
+        return [
+            p
+            for p in source
+            if p.name not in self._quarantined
+            and PluginCapability.GUARDRAIL in p.metadata.capabilities
+        ]
+
+    async def notify_config_reload(
+        self, old_config: dict[str, Any], new_config: dict[str, Any]
+    ) -> None:
+        """Dispatch on_config_reload to all active plugins."""
+        source = (
+            self._sorted_plugins if self._sorted_plugins is not None else self._plugins
+        )
+        for plugin in source:
+            if plugin.name in self._quarantined:
+                continue
+            try:
+                await plugin.on_config_reload(old_config, new_config)
+            except Exception as e:
+                logger.warning(f"Plugin {plugin.name} on_config_reload failed: {e}")
+
+    async def notify_route_registered(
+        self, route_path: str, methods: list[str]
+    ) -> None:
+        """Dispatch on_route_register to all active plugins."""
+        source = (
+            self._sorted_plugins if self._sorted_plugins is not None else self._plugins
+        )
+        for plugin in source:
+            if plugin.name in self._quarantined:
+                continue
+            try:
+                await plugin.on_route_register(route_path, methods)
+            except Exception as e:
+                logger.warning(f"Plugin {plugin.name} on_route_register failed: {e}")
+
+    async def notify_circuit_breaker_change(
+        self, breaker_name: str, old_state: str, new_state: str
+    ) -> None:
+        """Dispatch on_circuit_breaker_change to all active plugins."""
+        source = (
+            self._sorted_plugins if self._sorted_plugins is not None else self._plugins
+        )
+        for plugin in source:
+            if plugin.name in self._quarantined:
+                continue
+            try:
+                await plugin.on_circuit_breaker_change(
+                    breaker_name, old_state, new_state
+                )
+            except Exception as e:
+                logger.warning(
+                    f"Plugin {plugin.name} on_circuit_breaker_change failed: {e}"
+                )
 
     async def health_checks(self) -> dict[str, dict[str, Any]]:
         """

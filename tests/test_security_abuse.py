@@ -22,14 +22,13 @@ Test Design Principles:
 """
 
 import json
-import os
 import pytest
 from typing import Any
 
 # Check if litellm is available
 try:
     import litellm  # noqa: F401
-    from fastapi import FastAPI, APIRouter, Depends, Request
+    from fastapi import FastAPI, Request  # noqa: F401
     from fastapi.testclient import TestClient
     from fastapi.responses import JSONResponse
 
@@ -68,7 +67,7 @@ def clean_env(monkeypatch):
 def app_with_security_middleware():
     """
     Create a FastAPI app with security middleware for testing.
-    
+
     This includes:
     - RequestIDMiddleware for correlation
     - Mock auth endpoints for testing header handling
@@ -118,7 +117,7 @@ def app_with_security_middleware():
                 )
 
             data = json.loads(body)
-            
+
             # Validate JSON-RPC structure
             if not isinstance(data, dict):
                 return JSONResponse(
@@ -225,7 +224,7 @@ def app_with_security_middleware():
 class TestMalformedPayloads:
     """
     Test malformed payloads and schema confusion attacks.
-    
+
     These tests verify that:
     - Invalid JSON is rejected with proper error codes
     - Schema violations return 400 (not 500)
@@ -245,7 +244,7 @@ class TestMalformedPayloads:
     def test_invalid_json_returns_400(self, app_with_security_middleware):
         """Invalid JSON should return 400 with parse error."""
         client = TestClient(app_with_security_middleware, raise_server_exceptions=False)
-        
+
         invalid_jsons = [
             b"{invalid}",
             b"{'single': 'quotes'}",
@@ -266,7 +265,7 @@ class TestMalformedPayloads:
     def test_wrong_type_jsonrpc_returns_400(self, app_with_security_middleware):
         """Wrong type for 'jsonrpc' field should return 400."""
         client = TestClient(app_with_security_middleware, raise_server_exceptions=False)
-        
+
         wrong_versions = [
             {"jsonrpc": 2.0, "method": "test"},  # Number instead of string
             {"jsonrpc": ["2.0"], "method": "test"},  # Array
@@ -283,9 +282,9 @@ class TestMalformedPayloads:
     def test_missing_method_returns_400(self, app_with_security_middleware):
         """Missing 'method' field should return 400."""
         client = TestClient(app_with_security_middleware, raise_server_exceptions=False)
-        
+
         response = client.post("/mcp", json={"jsonrpc": "2.0", "id": 1})
-        
+
         assert response.status_code == 400
         data = response.json()
         assert data["error"]["code"] == -32600
@@ -293,10 +292,10 @@ class TestMalformedPayloads:
     def test_array_body_returns_400(self, app_with_security_middleware):
         """Array body (batch request) should be handled gracefully."""
         client = TestClient(app_with_security_middleware, raise_server_exceptions=False)
-        
+
         # JSON-RPC 2.0 supports batch requests as arrays, but our mock rejects them
         response = client.post("/mcp", json=[{"jsonrpc": "2.0", "method": "test"}])
-        
+
         assert response.status_code == 400
         data = response.json()
         assert data["error"]["code"] == -32600  # Invalid request
@@ -304,15 +303,15 @@ class TestMalformedPayloads:
     def test_deeply_nested_json_no_crash(self, app_with_security_middleware):
         """Deeply nested JSON should not crash the server."""
         client = TestClient(app_with_security_middleware, raise_server_exceptions=False)
-        
+
         # Create a deeply nested structure (100 levels)
         nested: Any = "value"
         for _ in range(100):
             nested = {"nested": nested}
-        
+
         payload = {"jsonrpc": "2.0", "method": "test", "params": nested}
         response = client.post("/mcp", json=payload)
-        
+
         # Should return 400 (method not found) or 200, but NOT 500
         assert response.status_code in (200, 400), f"Got {response.status_code}"
         # Verify we got a valid JSON response
@@ -322,7 +321,7 @@ class TestMalformedPayloads:
     def test_large_string_values_no_crash(self, app_with_security_middleware):
         """Large string values should not crash the server."""
         client = TestClient(app_with_security_middleware, raise_server_exceptions=False)
-        
+
         # 10KB string value
         large_string = "A" * 10240
         payload = {
@@ -331,20 +330,20 @@ class TestMalformedPayloads:
             "params": {"data": large_string},
         }
         response = client.post("/mcp", json=payload)
-        
+
         # Should handle gracefully (400 method not found, not 500)
         assert response.status_code in (200, 400)
 
     def test_unicode_edge_cases_no_crash(self, app_with_security_middleware):
         """Unicode edge cases should not crash the server."""
         client = TestClient(app_with_security_middleware, raise_server_exceptions=False)
-        
+
         unicode_strings = [
             "\u0000",  # Null character
-            "\uFFFD",  # Replacement character
+            "\ufffd",  # Replacement character
             "🎉" * 100,  # Emoji
             "测试" * 100,  # CJK characters
-            "\u202E" + "reversed",  # Right-to-left override
+            "\u202e" + "reversed",  # Right-to-left override
         ]
 
         for s in unicode_strings:
@@ -356,7 +355,7 @@ class TestMalformedPayloads:
     def test_special_json_values_no_crash(self, app_with_security_middleware):
         """Special JSON values should be handled properly."""
         client = TestClient(app_with_security_middleware, raise_server_exceptions=False)
-        
+
         special_payloads = [
             {"jsonrpc": "2.0", "method": "test", "params": None},
             {"jsonrpc": "2.0", "method": "test", "params": []},
@@ -380,7 +379,7 @@ class TestMalformedPayloads:
 class TestHeaderSmuggling:
     """
     Test header smuggling and duplicate header attacks.
-    
+
     These tests verify that:
     - Duplicate headers are handled consistently
     - Suspicious header patterns don't cause undefined behavior
@@ -390,12 +389,12 @@ class TestHeaderSmuggling:
     def test_duplicate_authorization_headers(self, app_with_security_middleware):
         """
         Duplicate Authorization headers should be handled safely.
-        
+
         Note: HTTP/1.1 spec allows comma-separated values for some headers,
         but Authorization should not be duplicated in valid requests.
         """
         client = TestClient(app_with_security_middleware, raise_server_exceptions=False)
-        
+
         # TestClient doesn't support duplicate headers easily, but we can test
         # the header parsing behavior
         response = client.post(
@@ -403,36 +402,36 @@ class TestHeaderSmuggling:
             headers={"Authorization": "Bearer token1, Bearer token2"},
             content=b"{}",
         )
-        
+
         # Should not crash - return 200 or appropriate error
         assert response.status_code in (200, 400, 401, 422)
 
     def test_transfer_encoding_header_ignored(self, app_with_security_middleware):
         """
         Transfer-Encoding header manipulation should be handled by ASGI server.
-        
+
         This tests that we don't crash on suspicious Transfer-Encoding values.
         The actual header is typically stripped by the ASGI server.
         """
         client = TestClient(app_with_security_middleware, raise_server_exceptions=False)
-        
+
         response = client.post(
             "/api/echo",
             headers={"Transfer-Encoding": "chunked, chunked"},
             content=b"{}",
         )
-        
+
         # Should not crash
         assert response.status_code in (200, 400, 422)
 
     def test_content_length_mismatch(self, app_with_security_middleware):
         """
         Content-Length mismatch should be handled by ASGI server.
-        
+
         Note: TestClient may normalize this, but real clients could send mismatched values.
         """
         client = TestClient(app_with_security_middleware, raise_server_exceptions=False)
-        
+
         # Send content with explicit Content-Length header
         # TestClient typically handles this correctly, so we just verify no crash
         response = client.post(
@@ -440,29 +439,29 @@ class TestHeaderSmuggling:
             headers={"Content-Length": "9999"},
             content=b"small",
         )
-        
+
         # The ASGI server may adjust Content-Length or fail with 400
         assert response.status_code in (200, 400, 422)
 
     def test_oversized_header_value_no_crash(self, app_with_security_middleware):
         """Oversized header values should be rejected, not cause a crash."""
         client = TestClient(app_with_security_middleware, raise_server_exceptions=False)
-        
+
         # Create a very large header value (8KB)
         large_header = "A" * 8192
-        
+
         response = client.get(
             "/_health/live",
             headers={"X-Custom-Header": large_header},
         )
-        
+
         # Should either succeed or reject with 431/400, not 500
         assert response.status_code in (200, 400, 431)
 
     def test_null_bytes_in_headers_no_crash(self, app_with_security_middleware):
         """Null bytes in header values should be handled safely."""
         client = TestClient(app_with_security_middleware, raise_server_exceptions=False)
-        
+
         # Note: Most HTTP implementations strip or reject null bytes
         # We just verify no crash
         try:
@@ -479,7 +478,7 @@ class TestHeaderSmuggling:
     def test_newlines_in_headers_no_crash(self, app_with_security_middleware):
         """Newlines in header values (CRLF injection) should be handled safely."""
         client = TestClient(app_with_security_middleware, raise_server_exceptions=False)
-        
+
         # Attempt CRLF injection in header value
         # Note: HTTPX and most modern clients reject these at the client level
         try:
@@ -496,12 +495,12 @@ class TestHeaderSmuggling:
     def test_many_headers_no_crash(self, app_with_security_middleware):
         """Many headers should not cause resource exhaustion."""
         client = TestClient(app_with_security_middleware, raise_server_exceptions=False)
-        
+
         # Create 100 custom headers
         headers = {f"X-Custom-Header-{i}": f"value-{i}" for i in range(100)}
-        
+
         response = client.get("/_health/live", headers=headers)
-        
+
         # Should succeed or reject gracefully
         assert response.status_code in (200, 400, 431)
 
@@ -514,12 +513,12 @@ class TestHeaderSmuggling:
 class TestRequestSizeAbuse:
     """
     Test request size abuse scenarios.
-    
+
     These tests verify that:
     - Oversized request bodies are rejected (or handled gracefully)
     - The server doesn't crash or hang on large payloads
     - Memory isn't exhausted by large requests
-    
+
     Note: FastAPI/Starlette has a default body limit of 100MB.
     These tests use smaller payloads for CI performance.
     """
@@ -527,17 +526,17 @@ class TestRequestSizeAbuse:
     def test_oversized_json_body_handled(self, app_with_security_middleware):
         """
         Oversized JSON body should be handled gracefully.
-        
+
         Note: Without explicit size limits, this tests graceful handling.
         In production, body size limits should be enforced.
         """
         client = TestClient(app_with_security_middleware, raise_server_exceptions=False)
-        
+
         # Create a 1MB JSON payload (reasonable for testing)
         large_data = {"data": "A" * (1024 * 1024)}
-        
+
         response = client.post("/api/echo", json=large_data)
-        
+
         # Should complete (200) or reject (413/400), not crash
         assert response.status_code in (200, 400, 413)
         # If accepted, verify response is valid
@@ -548,23 +547,23 @@ class TestRequestSizeAbuse:
     def test_many_array_elements_no_crash(self, app_with_security_middleware):
         """Many array elements should not cause stack overflow."""
         client = TestClient(app_with_security_middleware, raise_server_exceptions=False)
-        
+
         # 10,000 array elements
         payload = {
             "jsonrpc": "2.0",
             "method": "test",
             "params": {"items": list(range(10000))},
         }
-        
+
         response = client.post("/mcp", json=payload)
-        
+
         # Should handle gracefully
         assert response.status_code in (200, 400)
 
     def test_many_object_keys_no_crash(self, app_with_security_middleware):
         """Many object keys should not cause issues."""
         client = TestClient(app_with_security_middleware, raise_server_exceptions=False)
-        
+
         # 1,000 object keys
         params = {f"key_{i}": f"value_{i}" for i in range(1000)}
         payload = {
@@ -572,30 +571,30 @@ class TestRequestSizeAbuse:
             "method": "test",
             "params": params,
         }
-        
+
         response = client.post("/mcp", json=payload)
-        
+
         # Should handle gracefully
         assert response.status_code in (200, 400)
 
     def test_repeated_key_handling(self, app_with_security_middleware):
         """
         Repeated keys in JSON should be handled deterministically.
-        
+
         JSON spec doesn't define behavior for duplicate keys, but Python's
         json.loads uses the last value. We test this is consistent.
         """
         client = TestClient(app_with_security_middleware, raise_server_exceptions=False)
-        
+
         # Raw JSON with duplicate keys (last value wins in Python)
         raw_json = b'{"jsonrpc": "2.0", "method": "first", "method": "last"}'
-        
+
         response = client.post(
             "/mcp",
             content=raw_json,
             headers={"Content-Type": "application/json"},
         )
-        
+
         # Should not crash
         assert response.status_code in (200, 400)
 
@@ -608,12 +607,12 @@ class TestRequestSizeAbuse:
 class TestInjectionStylePayloads:
     """
     Test injection-style payloads including prompt injection patterns.
-    
+
     These tests verify that:
     - Prompt injection patterns don't cause crashes or 500 errors
     - Special characters in payloads are handled safely
     - No unintended side effects occur (tool execution, etc.)
-    
+
     These are *tests* that malformed/malicious input is handled safely,
     NOT guardrails that block such content.
     """
@@ -649,11 +648,11 @@ class TestInjectionStylePayloads:
     def test_prompt_injection_in_method_no_crash(self, app_with_security_middleware):
         """Prompt injection patterns in method field should not crash."""
         client = TestClient(app_with_security_middleware, raise_server_exceptions=False)
-        
+
         for pattern in self.PROMPT_INJECTION_PATTERNS:
             payload = {"jsonrpc": "2.0", "method": pattern, "id": 1}
             response = client.post("/mcp", json=payload)
-            
+
             # Should return 400 (method not found), NOT 500
             assert response.status_code in (200, 400), f"Failed for: {repr(pattern)}"
             # Verify valid JSON response
@@ -663,7 +662,7 @@ class TestInjectionStylePayloads:
     def test_prompt_injection_in_params_no_crash(self, app_with_security_middleware):
         """Prompt injection patterns in params should not crash."""
         client = TestClient(app_with_security_middleware, raise_server_exceptions=False)
-        
+
         for pattern in self.PROMPT_INJECTION_PATTERNS:
             payload = {
                 "jsonrpc": "2.0",
@@ -675,14 +674,14 @@ class TestInjectionStylePayloads:
                 "id": 1,
             }
             response = client.post("/mcp", json=payload)
-            
+
             # Should complete without crash
             assert response.status_code in (200, 400), f"Failed for: {repr(pattern)}"
 
     def test_sql_injection_patterns_no_crash(self, app_with_security_middleware):
         """SQL injection patterns should not crash the server."""
         client = TestClient(app_with_security_middleware, raise_server_exceptions=False)
-        
+
         sql_patterns = [
             "'; DROP TABLE users; --",
             "1 OR 1=1",
@@ -700,14 +699,14 @@ class TestInjectionStylePayloads:
                 "id": 1,
             }
             response = client.post("/mcp", json=payload)
-            
+
             # Should not crash
             assert response.status_code in (200, 400)
 
     def test_command_injection_patterns_no_crash(self, app_with_security_middleware):
         """Command injection patterns should not crash the server."""
         client = TestClient(app_with_security_middleware, raise_server_exceptions=False)
-        
+
         cmd_patterns = [
             "; ls -la",
             "| cat /etc/passwd",
@@ -725,14 +724,14 @@ class TestInjectionStylePayloads:
                 "id": 1,
             }
             response = client.post("/mcp", json=payload)
-            
+
             # Should not crash
             assert response.status_code in (200, 400)
 
     def test_path_traversal_patterns_no_crash(self, app_with_security_middleware):
         """Path traversal patterns should not crash the server."""
         client = TestClient(app_with_security_middleware, raise_server_exceptions=False)
-        
+
         path_patterns = [
             "../../../etc/passwd",
             "..\\..\\..\\windows\\system32",
@@ -749,14 +748,14 @@ class TestInjectionStylePayloads:
                 "id": 1,
             }
             response = client.post("/mcp", json=payload)
-            
+
             # Should not crash
             assert response.status_code in (200, 400)
 
     def test_xxe_patterns_no_crash(self, app_with_security_middleware):
         """XXE-style patterns in JSON should not crash."""
         client = TestClient(app_with_security_middleware, raise_server_exceptions=False)
-        
+
         xxe_patterns = [
             '<!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///etc/passwd">]>',
             '<?xml version="1.0"?><!DOCTYPE root [<!ENTITY test "test">]>',
@@ -771,17 +770,17 @@ class TestInjectionStylePayloads:
                 "id": 1,
             }
             response = client.post("/mcp", json=payload)
-            
+
             # Should not crash
             assert response.status_code in (200, 400)
 
     def test_control_characters_no_crash(self, app_with_security_middleware):
         """Control characters should not crash the server."""
         client = TestClient(app_with_security_middleware, raise_server_exceptions=False)
-        
+
         # ASCII control characters (except \x00 which may cause JSON issues)
         control_chars = "".join(chr(i) for i in range(1, 32) if i not in (0, 10, 13))
-        
+
         payload = {
             "jsonrpc": "2.0",
             "method": "test",
@@ -789,19 +788,19 @@ class TestInjectionStylePayloads:
             "id": 1,
         }
         response = client.post("/mcp", json=payload)
-        
+
         # Should not crash
         assert response.status_code in (200, 400)
 
     def test_unicode_normalization_attacks_no_crash(self, app_with_security_middleware):
         """Unicode normalization attacks should not crash."""
         client = TestClient(app_with_security_middleware, raise_server_exceptions=False)
-        
+
         unicode_attacks = [
             "\uff49\uff47\uff4e\uff4f\uff52\uff45",  # Full-width "ignore"
             "i\u0307gnore",  # Combining characters
             "\u2024\u2024/\u2024\u2024/",  # One dot leader (path traversal)
-            "\u202Ereversed\u202C",  # Right-to-left override
+            "\u202ereversed\u202c",  # Right-to-left override
         ]
 
         for pattern in unicode_attacks:
@@ -811,7 +810,7 @@ class TestInjectionStylePayloads:
                 "id": 1,
             }
             response = client.post("/mcp", json=payload)
-            
+
             # Should not crash
             assert response.status_code in (200, 400)
 
@@ -824,7 +823,7 @@ class TestInjectionStylePayloads:
 class TestErrorResponseSanitization:
     """
     Test that error responses are properly sanitized.
-    
+
     These tests verify that:
     - Error messages don't leak stack traces
     - Internal paths are not exposed
@@ -835,13 +834,13 @@ class TestErrorResponseSanitization:
     def test_error_no_stack_trace(self, app_with_security_middleware):
         """Error responses should not include stack traces."""
         client = TestClient(app_with_security_middleware, raise_server_exceptions=False)
-        
+
         # Send invalid JSON to trigger an error
         response = client.post("/mcp", content=b"{invalid}")
-        
+
         assert response.status_code == 400
         response_text = response.text.lower()
-        
+
         # Should not contain Python stack trace indicators
         # Note: "line X column Y" in JSON parse errors is acceptable (not a stack trace)
         assert "traceback" not in response_text
@@ -852,16 +851,18 @@ class TestErrorResponseSanitization:
     def test_error_no_internal_paths(self, app_with_security_middleware):
         """Error responses should not include internal file paths."""
         client = TestClient(app_with_security_middleware, raise_server_exceptions=False)
-        
+
         response = client.post("/mcp", content=b"{invalid}")
-        
+
         response_text = response.text
-        
+
         # Should not contain internal paths
         assert "/home/" not in response_text
         assert "/Users/" not in response_text
         assert "site-packages" not in response_text
-        assert ".py" not in response_text or "JSON" in response_text  # Allow if part of error message
+        assert (
+            ".py" not in response_text or "JSON" in response_text
+        )  # Allow if part of error message
 
 
 # =============================================================================
@@ -872,7 +873,7 @@ class TestErrorResponseSanitization:
 class TestRequestIDCorrelation:
     """
     Test that request IDs are properly correlated in responses.
-    
+
     These tests verify that:
     - Request IDs are passed through to responses
     - Generated request IDs are valid UUIDs
@@ -882,13 +883,13 @@ class TestRequestIDCorrelation:
     def test_request_id_passthrough(self, app_with_security_middleware):
         """Custom request ID should be passed through."""
         client = TestClient(app_with_security_middleware)
-        
+
         custom_id = "test-request-id-12345"
         response = client.get(
             "/_health/live",
             headers={"X-Request-ID": custom_id},
         )
-        
+
         assert response.status_code == 200
         assert response.headers.get("X-Request-ID") == custom_id
 
@@ -897,22 +898,22 @@ class TestRequestIDCorrelation:
         import uuid
 
         client = TestClient(app_with_security_middleware)
-        
+
         response = client.get("/_health/live")
-        
+
         assert response.status_code == 200
         request_id = response.headers.get("X-Request-ID")
         assert request_id is not None
-        
+
         # Should be a valid UUID
         uuid.UUID(request_id)
 
     def test_request_id_in_response_body(self, app_with_security_middleware):
         """Request ID should be included in response body."""
         client = TestClient(app_with_security_middleware)
-        
+
         response = client.get("/_health/live")
-        
+
         assert response.status_code == 200
         data = response.json()
         assert "request_id" in data

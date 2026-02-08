@@ -45,7 +45,9 @@ Thread Safety:
 """
 
 import asyncio
+import base64
 import json
+import logging
 import os
 import time
 import uuid
@@ -59,6 +61,8 @@ from litellm.proxy.auth.user_api_key_auth import user_api_key_auth
 
 from .auth import get_request_id
 from .mcp_gateway import get_mcp_gateway, MCPToolResult
+
+logger = logging.getLogger(__name__)
 
 # ============================================================================
 # Configuration & Feature Flags
@@ -86,12 +90,16 @@ MCP_SSE_RETRY_INTERVAL_MS = int(os.getenv("MCP_SSE_RETRY_INTERVAL_MS", "3000"))
 # Session timeout in seconds (default: 5 minutes of inactivity)
 MCP_SSE_SESSION_TIMEOUT = float(os.getenv("MCP_SSE_SESSION_TIMEOUT", "300"))
 
-# Protocol version
-MCP_PROTOCOL_VERSION = "2024-11-05"
+# Protocol versions (MCP spec versions we support)
+MCP_PROTOCOL_VERSION = "2025-11-25"
+MCP_SUPPORTED_VERSIONS = {"2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"}
 
 # Server info
 MCP_SERVER_NAME = os.getenv("MCP_SERVER_NAME", "routeiq-mcp-gateway")
 MCP_SERVER_VERSION = os.getenv("MCP_SERVER_VERSION", "1.0.0")
+
+# Pagination config for tools/list
+MCP_TOOLS_PAGE_SIZE = int(os.getenv("MCP_TOOLS_PAGE_SIZE", "100"))
 
 
 # ============================================================================
@@ -163,6 +171,27 @@ async def get_session(session_id: str) -> SSESession | None:
     if session and session.is_active and not session.is_expired():
         return session
     return None
+
+
+def notify_tools_list_changed() -> None:
+    """
+    Emit notifications/tools/list_changed to all active SSE sessions.
+
+    Called by MCPGateway when tools are registered/unregistered.
+    Per MCP spec, this is a notification (no id, no response expected).
+    """
+    notification = {
+        "jsonrpc": "2.0",
+        "method": "notifications/tools/list_changed",
+    }
+    for session in list(_sse_sessions.values()):
+        if session.is_active and not session.is_expired():
+            try:
+                # Use non-async put_nowait since this may be called from sync context
+                if session._response_queue is not None:
+                    session._response_queue.put_nowait(notification)
+            except Exception:
+                pass  # Best-effort delivery
 
 
 async def cleanup_expired_sessions() -> int:
@@ -476,6 +505,10 @@ async def mcp_sse_endpoint(request: Request) -> StreamingResponse:
             },
         )
 
+    # Register SSE notification callback (idempotent via check)
+    if notify_tools_list_changed not in gateway._on_tools_changed_callbacks:
+        gateway.on_tools_changed(notify_tools_list_changed)
+
     # Check Accept header
     accept = request.headers.get("accept", "")
     if "text/event-stream" not in accept and "*/*" not in accept:
@@ -662,7 +695,9 @@ async def mcp_legacy_messages_endpoint(
     # Dispatch to handler
     try:
         response = await _dispatch_jsonrpc_method(method, request_id, params, session)
-        await session.send_response(response)
+        # Notifications return None (no response expected)
+        if response is not None:
+            await session.send_response(response)
     except Exception as e:
         verbose_proxy_logger.exception(
             f"MCP SSE: Error dispatching {method} for session {sessionId}: {e}"
@@ -707,6 +742,12 @@ async def _dispatch_jsonrpc_method(
             },
         }
 
+    # Handle notifications (no response expected)
+    if method == "notifications/initialized":
+        session.is_initialized = True
+        session.touch()
+        return None  # type: ignore[return-value]
+
     if method == "initialize":
         return await _handle_initialize_sse(request_id, params, session, gateway)
     elif method == "tools/list":
@@ -715,13 +756,44 @@ async def _dispatch_jsonrpc_method(
         return await _handle_tools_call_sse(request_id, params, gateway)
     elif method == "resources/list":
         return await _handle_resources_list_sse(request_id, params, gateway)
+    elif method == "resources/templates/list":
+        return {
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "result": {"resourceTemplates": []},
+        }
+    elif method == "logging/setLevel":
+        level = (params or {}).get("level", "info")
+        logger.info(f"MCP SSE client requested log level: {level}")
+        return {
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "result": {},
+        }
+    elif method == "completion/complete":
+        return {
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "result": {
+                "completion": {
+                    "values": [],
+                    "hasMore": False,
+                    "total": 0,
+                }
+            },
+        }
     else:
         return {
             "jsonrpc": "2.0",
             "id": request_id,
             "error": {
                 "code": -32601,  # JSONRPC_METHOD_NOT_FOUND
-                "message": f"Method '{method}' not found. Supported: initialize, tools/list, tools/call, resources/list",
+                "message": (
+                    f"Method '{method}' not found. Supported: initialize, "
+                    "notifications/initialized, tools/list, tools/call, "
+                    "resources/list, resources/templates/list, logging/setLevel, "
+                    "completion/complete"
+                ),
             },
         }
 
@@ -732,26 +804,43 @@ async def _handle_initialize_sse(
     session: SSESession,
     gateway: Any,
 ) -> dict[str, Any]:
-    """Handle MCP initialize request."""
+    """Handle MCP initialize request with protocol version negotiation."""
     session.is_initialized = True
     session.touch()
 
-    # Server capabilities per MCP spec
-    capabilities = {
+    # Protocol version negotiation
+    client_version = (params or {}).get("protocolVersion", MCP_PROTOCOL_VERSION)
+    if client_version in MCP_SUPPORTED_VERSIONS:
+        negotiated_version = client_version
+    else:
+        return {
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "error": {
+                "code": -32602,  # JSONRPC_INVALID_PARAMS
+                "message": (
+                    f"Unsupported protocol version: {client_version}. "
+                    f"Supported versions: {sorted(MCP_SUPPORTED_VERSIONS)}"
+                ),
+            },
+        }
+
+    session.protocol_version = negotiated_version
+
+    # Server capabilities per MCP spec (2025-11-25)
+    capabilities: dict[str, Any] = {
         "tools": {
             "listChanged": True,
         },
-        "resources": {
-            "listChanged": True,
-            "subscribe": False,
-        },
+        "logging": {},
+        "completion": {},
     }
 
     return {
         "jsonrpc": "2.0",
         "id": request_id,
         "result": {
-            "protocolVersion": MCP_PROTOCOL_VERSION,
+            "protocolVersion": negotiated_version,
             "capabilities": capabilities,
             "serverInfo": {
                 "name": MCP_SERVER_NAME,
@@ -761,18 +850,33 @@ async def _handle_initialize_sse(
     }
 
 
+def _decode_cursor(cursor: str | None) -> int:
+    """Decode a base64-encoded pagination cursor to an offset."""
+    if not cursor:
+        return 0
+    try:
+        return int(base64.b64decode(cursor).decode())
+    except (ValueError, Exception):
+        return 0
+
+
+def _encode_cursor(offset: int) -> str:
+    """Encode an offset as a base64 pagination cursor."""
+    return base64.b64encode(str(offset).encode()).decode()
+
+
 async def _handle_tools_list_sse(
     request_id: int | str | None,
     params: dict[str, Any] | None,
     gateway: Any,
 ) -> dict[str, Any]:
-    """Handle MCP tools/list request."""
-    tools = []
+    """Handle MCP tools/list request with pagination and annotations."""
+    all_tools = []
     for server in gateway.list_servers():
         for tool_name in server.tools:
             namespaced_name = f"{server.server_id}.{tool_name}"
 
-            tool_entry = {
+            tool_entry: dict[str, Any] = {
                 "name": namespaced_name,
             }
 
@@ -782,16 +886,30 @@ async def _handle_tools_list_sse(
                     tool_def.description or f"Tool from {server.name}"
                 )
                 tool_entry["inputSchema"] = tool_def.input_schema or {"type": "object"}
+                # Propagate tool annotations (MCP 2025-03-26)
+                if tool_def.annotations:
+                    tool_entry["annotations"] = tool_def.annotations
             else:
                 tool_entry["description"] = f"Tool from {server.name}"
                 tool_entry["inputSchema"] = {"type": "object"}
 
-            tools.append(tool_entry)
+            all_tools.append(tool_entry)
+
+    # Apply cursor-based pagination
+    cursor = (params or {}).get("cursor")
+    offset = _decode_cursor(cursor)
+    page_size = MCP_TOOLS_PAGE_SIZE
+
+    page = all_tools[offset : offset + page_size]
+
+    result: dict[str, Any] = {"tools": page}
+    if offset + page_size < len(all_tools):
+        result["nextCursor"] = _encode_cursor(offset + page_size)
 
     return {
         "jsonrpc": "2.0",
         "id": request_id,
-        "result": {"tools": tools},
+        "result": result,
     }
 
 
@@ -806,7 +924,7 @@ async def _handle_tools_call_sse(
             "jsonrpc": "2.0",
             "id": request_id,
             "error": {
-                "code": -32002,  # MCP_TOOL_INVOCATION_DISABLED
+                "code": -32004,  # MCP_TOOL_INVOCATION_DISABLED
                 "message": "Remote tool invocation is disabled. Set LLMROUTER_ENABLE_MCP_TOOL_INVOCATION=true",
             },
         }
@@ -1082,7 +1200,7 @@ async def _handle_sse_tools_call(
                 "jsonrpc": "2.0",
                 "id": request_id,
                 "error": {
-                    "code": -32002,
+                    "code": -32004,  # MCP_TOOL_INVOCATION_DISABLED
                     "message": "Remote tool invocation is disabled",
                 },
             }

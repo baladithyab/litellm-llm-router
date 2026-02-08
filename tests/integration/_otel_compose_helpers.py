@@ -54,11 +54,11 @@ class JaegerTrace:
 
     trace_id: str
     spans: list[dict[str, Any]] = field(default_factory=list)
-    
+
     def get_span_attributes(self, span_name: str | None = None) -> dict[str, Any]:
         """
         Get attributes from a span by name, or from all spans if name is None.
-        
+
         Returns a flattened dict of attribute key -> value.
         """
         attrs = {}
@@ -68,7 +68,7 @@ class JaegerTrace:
             for tag in span.get("tags", []):
                 attrs[tag["key"]] = tag["value"]
         return attrs
-    
+
     def has_attribute(self, key: str, value: Any = None) -> bool:
         """Check if any span has the given attribute (optionally matching value)."""
         attrs = self.get_span_attributes()
@@ -87,25 +87,25 @@ class JaegerTrace:
 class JaegerQueryClient:
     """
     Client for querying Jaeger's HTTP API.
-    
+
     Jaeger API: https://www.jaegertracing.io/docs/1.54/apis/
     """
-    
+
     def __init__(self, base_url: str = "http://localhost:16686"):
         self.base_url = base_url.rstrip("/")
         self._client = httpx.Client(timeout=10.0)
-    
+
     def close(self):
         """Close the HTTP client."""
         self._client.close()
-    
+
     def get_services(self) -> list[str]:
         """Get list of services that have reported traces."""
         resp = self._client.get(f"{self.base_url}/api/services")
         resp.raise_for_status()
         data = resp.json()
         return data.get("data", [])
-    
+
     def get_traces(
         self,
         service: str,
@@ -116,14 +116,14 @@ class JaegerQueryClient:
     ) -> list[JaegerTrace]:
         """
         Query traces from Jaeger.
-        
+
         Args:
             service: Service name to query
             operation: Optional operation name filter
             tags: Optional tag filters (e.g., {"router.strategy": "knn"})
             limit: Maximum traces to return
             lookback: Time lookback (e.g., "1h", "30m")
-        
+
         Returns:
             List of JaegerTrace objects
         """
@@ -132,27 +132,27 @@ class JaegerQueryClient:
             "limit": limit,
             "lookBack": lookback,
         }
-        
+
         if operation:
             params["operation"] = operation
-        
+
         if tags:
             # Jaeger expects tags as "key=value" format
             tag_strs = [f"{k}={v}" for k, v in tags.items()]
             params["tags"] = "{" + ",".join(tag_strs) + "}"
-        
+
         resp = self._client.get(f"{self.base_url}/api/traces", params=params)
         resp.raise_for_status()
         data = resp.json()
-        
+
         traces = []
         for trace_data in data.get("data", []):
             trace_id = trace_data.get("traceID", "")
             spans = trace_data.get("spans", [])
             traces.append(JaegerTrace(trace_id=trace_id, spans=spans))
-        
+
         return traces
-    
+
     def wait_for_service(
         self,
         service: str,
@@ -161,7 +161,7 @@ class JaegerQueryClient:
     ) -> bool:
         """
         Wait for a service to appear in Jaeger.
-        
+
         Returns True if service appeared within timeout, False otherwise.
         """
         deadline = time.monotonic() + timeout
@@ -174,7 +174,7 @@ class JaegerQueryClient:
                 pass
             time.sleep(poll_interval)
         return False
-    
+
     def wait_for_trace_with_attribute(
         self,
         service: str,
@@ -185,14 +185,14 @@ class JaegerQueryClient:
     ) -> JaegerTrace | None:
         """
         Wait for a trace with a specific attribute to appear.
-        
+
         Args:
             service: Service name to query
             attribute_key: The span attribute key to look for
             attribute_value: Optional value the attribute must match
             timeout: Max seconds to wait
             poll_interval: Seconds between polls
-        
+
         Returns:
             The matching JaegerTrace, or None if timeout
         """
@@ -217,15 +217,15 @@ class JaegerQueryClient:
 class ComposeStackManager:
     """
     Manages Docker Compose stack lifecycle for tests.
-    
+
     Ensures cleanup on both success and failure via context manager.
     """
-    
+
     def __init__(self, config: OTelTestConfig):
         self.config = config
         self._compose_base: list[str] = []
         self._running = False
-    
+
     def _ensure_compose_cmd(self) -> None:
         """Ensure compose CLI is available."""
         if COMPOSE_CMD is None:
@@ -233,18 +233,18 @@ class ComposeStackManager:
                 "Docker/Finch CLI not found. "
                 "Install Docker or Finch: https://github.com/runfinch/finch"
             )
-    
+
     def start(self) -> None:
         """Start the compose stack."""
         self._ensure_compose_cmd()
-        
+
         if not os.path.exists(self.config.compose_file):
             raise FileNotFoundError(
                 f"Compose file not found: {self.config.compose_file}"
             )
-        
+
         self._compose_base = [COMPOSE_CMD, "compose", "-f", self.config.compose_file]
-        
+
         print(f"\n🚀 Starting OTel test stack with {COMPOSE_CMD}...")
         try:
             result = subprocess.run(
@@ -254,19 +254,21 @@ class ComposeStackManager:
                 text=True,
                 timeout=300,  # 5 minute build timeout
             )
-            print(f"Compose up stdout: {result.stdout[:500] if result.stdout else '(none)'}")
+            print(
+                f"Compose up stdout: {result.stdout[:500] if result.stdout else '(none)'}"
+            )
             self._running = True
         except subprocess.CalledProcessError as e:
             print(f"Compose up failed: {e.stderr}")
             raise RuntimeError(f"Failed to start compose stack: {e.stderr}")
         except subprocess.TimeoutExpired:
             raise RuntimeError("Compose up timed out after 5 minutes")
-    
+
     def wait_for_health(self) -> None:
         """Wait for the gateway to become healthy."""
         print(f"⏳ Waiting for gateway health at {self.config.gateway_url}...")
         deadline = time.monotonic() + self.config.startup_timeout
-        
+
         while time.monotonic() < deadline:
             try:
                 resp = httpx.get(
@@ -280,18 +282,18 @@ class ComposeStackManager:
             except (httpx.RequestError, httpx.TimeoutException) as e:
                 print(f"Waiting: {e}")
             time.sleep(3)
-        
+
         # Timeout - get logs for debugging
         self._dump_logs()
         raise RuntimeError(
             f"Gateway did not become healthy within {self.config.startup_timeout}s"
         )
-    
+
     def wait_for_jaeger(self) -> None:
         """Wait for Jaeger to be accessible."""
         print(f"⏳ Waiting for Jaeger at {self.config.jaeger_url}...")
         deadline = time.monotonic() + 60  # 60s for Jaeger
-        
+
         while time.monotonic() < deadline:
             try:
                 resp = httpx.get(f"{self.config.jaeger_url}/api/services", timeout=5.0)
@@ -301,14 +303,14 @@ class ComposeStackManager:
             except (httpx.RequestError, httpx.TimeoutException):
                 pass
             time.sleep(2)
-        
+
         raise RuntimeError("Jaeger did not become accessible within 60s")
-    
+
     def stop(self) -> None:
         """Stop and teardown the compose stack."""
         if not self._running or not self._compose_base:
             return
-        
+
         print("\n🧹 Tearing down OTel test stack...")
         try:
             subprocess.run(
@@ -320,12 +322,12 @@ class ComposeStackManager:
             print(f"Warning: Teardown error: {e}")
         finally:
             self._running = False
-    
+
     def _dump_logs(self) -> None:
         """Dump container logs for debugging."""
         if not self._compose_base:
             return
-        
+
         try:
             result = subprocess.run(
                 self._compose_base + ["logs", "--tail=100"],
@@ -344,20 +346,20 @@ def otel_compose_stack(
 ) -> Generator[tuple[ComposeStackManager, JaegerQueryClient], None, None]:
     """
     Context manager for OTel compose stack with guaranteed cleanup.
-    
+
     Usage:
         with otel_compose_stack() as (stack, jaeger):
             # Make requests to stack.config.gateway_url
             # Query traces via jaeger.get_traces(...)
-    
+
     The stack is always torn down, even if an exception occurs.
     """
     if config is None:
         config = OTelTestConfig()
-    
+
     stack = ComposeStackManager(config)
     jaeger = JaegerQueryClient(config.jaeger_url)
-    
+
     try:
         stack.start()
         stack.wait_for_health()
@@ -396,14 +398,14 @@ REQUIRED_ROUTER_ATTRIBUTES = [
 def validate_router_decision_trace(trace: JaegerTrace) -> tuple[bool, list[str]]:
     """
     Validate that a trace contains router decision attributes from TG4.1.
-    
+
     Returns:
         Tuple of (is_valid, list_of_found_attributes)
     """
     attrs = trace.get_span_attributes()
     found = [attr for attr in ROUTER_DECISION_ATTRIBUTES if attr in attrs]
-    
+
     # Check minimum required attributes
     has_required = all(attr in attrs for attr in REQUIRED_ROUTER_ATTRIBUTES)
-    
+
     return has_required, found

@@ -16,14 +16,12 @@ Tests cover:
 from __future__ import annotations
 
 import os
-import uuid
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi import HTTPException
 
 from litellm_llmrouter.auth import (
-    RequestIDMiddleware,
     _extract_bearer_token,
     _is_admin_auth_enabled,
     _load_admin_api_keys,
@@ -182,9 +180,7 @@ class TestLoadAdminApiKeys:
             assert keys == {"key1"}
 
     def test_multiple_keys_from_admin_api_keys(self):
-        with patch.dict(
-            os.environ, {"ADMIN_API_KEYS": "key1,key2,key3"}, clear=True
-        ):
+        with patch.dict(os.environ, {"ADMIN_API_KEYS": "key1,key2,key3"}, clear=True):
             keys = _load_admin_api_keys()
             assert keys == {"key1", "key2", "key3"}
 
@@ -196,9 +192,7 @@ class TestLoadAdminApiKeys:
             assert keys == {"key1", "key2", "key3"}
 
     def test_empty_keys_filtered(self):
-        with patch.dict(
-            os.environ, {"ADMIN_API_KEYS": "key1,,key2,,"}, clear=True
-        ):
+        with patch.dict(os.environ, {"ADMIN_API_KEYS": "key1,,key2,,"}, clear=True):
             keys = _load_admin_api_keys()
             assert keys == {"key1", "key2"}
 
@@ -296,9 +290,7 @@ class TestAdminApiKeyAuth:
     @pytest.mark.asyncio
     async def test_no_keys_configured_denies(self):
         """Fail-closed: no admin keys = deny all."""
-        with patch.dict(
-            os.environ, {"ADMIN_AUTH_ENABLED": "true"}, clear=True
-        ):
+        with patch.dict(os.environ, {"ADMIN_AUTH_ENABLED": "true"}, clear=True):
             request = self._make_request()
             with pytest.raises(HTTPException) as exc:
                 await admin_api_key_auth(request)

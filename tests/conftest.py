@@ -55,9 +55,16 @@ def pytest_collection_modifyitems(config, items):
             if "/integration/" in fspath_str or "\\integration\\" in fspath_str:
                 # Don't skip tests that manage their own compose stack
                 parent_name = getattr(item.parent, "name", "") if item.parent else ""
-                if parent_name not in self_managed_tests and item.name not in self_managed_tests:
+                if (
+                    parent_name not in self_managed_tests
+                    and item.name not in self_managed_tests
+                ):
                     # Check module name as well
-                    module_name = item.fspath.purebasename if hasattr(item.fspath, 'purebasename') else ""
+                    module_name = (
+                        item.fspath.purebasename
+                        if hasattr(item.fspath, "purebasename")
+                        else ""
+                    )
                     if module_name not in self_managed_tests:
                         item.add_marker(skip_integration)
 

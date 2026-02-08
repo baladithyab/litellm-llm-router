@@ -12,7 +12,7 @@ These tests verify:
 import asyncio
 import json
 import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import patch
 
 # Mark all tests in this module as asyncio
 pytestmark = pytest.mark.asyncio

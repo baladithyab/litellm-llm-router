@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import os
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -227,7 +227,9 @@ class TestAuditLogRepository:
             )
 
             # Mock _persist_to_db to raise an error (avoids asyncpg import issue)
-            with patch.object(repo, "_persist_to_db", side_effect=Exception("DB connection failed")):
+            with patch.object(
+                repo, "_persist_to_db", side_effect=Exception("DB connection failed")
+            ):
                 with patch("litellm_llmrouter.audit.logger") as mock_logger:
                     result = await repo.write(entry)
                     assert result is True  # fail-open continues
@@ -253,7 +255,9 @@ class TestAuditLogRepository:
             )
 
             # Mock _persist_to_db to raise an error (avoids asyncpg import issue)
-            with patch.object(repo, "_persist_to_db", side_effect=Exception("DB connection failed")):
+            with patch.object(
+                repo, "_persist_to_db", side_effect=Exception("DB connection failed")
+            ):
                 with pytest.raises(AuditWriteError) as exc_info:
                     await repo.write(entry)
                 assert "DB connection failed" in str(exc_info.value)
@@ -360,7 +364,9 @@ class TestAuditActions:
         """Verify action values use dotted notation for readability."""
         # Actions use dotted notation like "mcp.server.create"
         for action in AuditAction:
-            assert "." in action.value, f"Action {action.name} should use dotted notation"
+            assert "." in action.value, (
+                f"Action {action.name} should use dotted notation"
+            )
 
 
 class TestAuditOutcomes:
@@ -370,7 +376,9 @@ class TestAuditOutcomes:
         """Verify all expected audit outcomes exist."""
         expected = ["SUCCESS", "DENIED", "ERROR"]
         for outcome_name in expected:
-            assert hasattr(AuditOutcome, outcome_name), f"Missing outcome: {outcome_name}"
+            assert hasattr(AuditOutcome, outcome_name), (
+                f"Missing outcome: {outcome_name}"
+            )
 
     def test_outcome_values_are_lowercase(self):
         """Verify outcome values are lowercase."""

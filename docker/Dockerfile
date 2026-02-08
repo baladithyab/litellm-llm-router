@@ -98,7 +98,7 @@ RUN groupadd -r -g 1000 litellm && \
 WORKDIR /app
 
 # Install minimal runtime dependencies in single layer (cleanup in same RUN)
-# Note: build-essential needed for uvloop compilation
+# Note: build-essential installed temporarily for uvloop compilation, then removed
 # Note: libatomic1 needed for Prisma/Node.js on slim images
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
@@ -120,16 +120,22 @@ COPY src/ /app/src/
 
 # Install all Python dependencies using uv pip install --system
 # --system: Install to system Python (not a venv) so packages are available at runtime
-# Order: wheels → uv pip install with all production extras
+# UV_EXTRA_INDEX_URL: Use CPU-only PyTorch to avoid shipping ~3GB CUDA libraries
+# Order: wheels → uv pip install with all production extras → remove build tools
 RUN --mount=type=cache,target=/root/.cache/uv \
+    UV_EXTRA_INDEX_URL=https://download.pytorch.org/whl/cpu \
     # Install LLMRouter wheel first (not in lockfile, built from source at pinned commit)
     uv pip install --system /wheels/*.whl || true \
     # Install project dependencies with production extras
     # --system ensures packages go to system Python, not a venv
     # All OTEL packages are included via the 'otel' extra
-    && cd /app && uv pip install --system -e ".[prod,db,otel,cloud,callbacks,knn]" \
+    && cd /app && UV_EXTRA_INDEX_URL=https://download.pytorch.org/whl/cpu \
+    uv pip install --system -e ".[prod,db,otel,cloud,callbacks,knn]" \
     # Cleanup wheels and temp files
-    && rm -rf /wheels
+    && rm -rf /wheels \
+    # Remove build-essential (no longer needed after compilation)
+    && apt-get purge -y --auto-remove build-essential \
+    && rm -rf /var/lib/apt/lists/*
 
 # Pre-generate Prisma client and fix permissions on LiteLLM directories
 # This is done as root to avoid runtime permission errors

@@ -4,9 +4,8 @@ Unit tests for MCP Native JSON-RPC Transport.
 Tests the /mcp endpoint with JSON-RPC 2.0 protocol.
 """
 
-import json
 import os
-from unittest.mock import MagicMock, patch, AsyncMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi import FastAPI
@@ -286,7 +285,7 @@ class TestMCPJSONRPCToolsCall:
 
             data = response.json()
             assert "error" in data
-            assert data["error"]["code"] == -32002  # MCP_TOOL_INVOCATION_DISABLED
+            assert data["error"]["code"] == -32004  # MCP_TOOL_INVOCATION_DISABLED
 
 
 class TestMCPJSONRPCResourcesList:

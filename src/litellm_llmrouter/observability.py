@@ -558,7 +558,7 @@ class ObservabilityManager:
         logger.info(f"Logging initialized with OTLP endpoint: {self.otlp_endpoint}")
 
     def _init_metrics(self) -> None:
-        """Initialize metrics collection with OTLP exporter."""
+        """Initialize metrics collection with OTLP exporter and instrument registry."""
         # Check if a meter provider already exists
         existing_provider = metrics.get_meter_provider()
         if hasattr(existing_provider, "register_metric_reader"):
@@ -582,6 +582,15 @@ class ObservabilityManager:
 
         # Get meter for this module
         self._meter = metrics.get_meter(__name__, self.service_version)
+
+        # Initialize the central metrics instrument registry
+        try:
+            from litellm_llmrouter.metrics import init_gateway_metrics
+
+            init_gateway_metrics(self._meter)
+            logger.info("GatewayMetrics instrument registry initialized")
+        except Exception as e:
+            logger.warning(f"Failed to initialize GatewayMetrics: {e}")
 
         logger.info(f"Metrics initialized with OTLP endpoint: {self.otlp_endpoint}")
 
@@ -796,3 +805,34 @@ def get_meter() -> metrics.Meter:
             "Observability not initialized. Call init_observability() first."
         )
     return _observability_manager.get_meter()
+
+
+def reset_observability_manager() -> None:
+    """
+    Reset the global observability manager singleton.
+
+    Must be called in test fixtures to avoid singleton leaks between tests.
+    Also resets the dependent GatewayMetrics singleton.
+    """
+    global _observability_manager
+    _observability_manager = None
+
+    # Also reset the metrics singleton which depends on the meter
+    from litellm_llmrouter.metrics import reset_gateway_metrics
+
+    reset_gateway_metrics()
+
+
+def record_ttft(model: str, duration_s: float) -> None:
+    """
+    Record time-to-first-token for a streaming response.
+
+    Args:
+        model: The model that generated the streaming response.
+        duration_s: Time in seconds from request start to first token.
+    """
+    from litellm_llmrouter.metrics import get_gateway_metrics
+
+    gw_metrics = get_gateway_metrics()
+    if gw_metrics is not None:
+        gw_metrics.time_to_first_token.record(duration_s, {"model": model})

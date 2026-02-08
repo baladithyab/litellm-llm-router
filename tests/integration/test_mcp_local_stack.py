@@ -38,7 +38,7 @@ import pytest
 import requests
 
 if TYPE_CHECKING:
-    from typing import Any
+    pass
 
 # =============================================================================
 # Test Configuration
@@ -262,8 +262,12 @@ def docker_stack() -> Generator[bool, None, None]:
     )
 
     if not gateway_healthy:
-        print(f"[MCP Integration] Gateway did not become healthy within {DOCKER_STARTUP_TIMEOUT}s")
-        print(f"[MCP Integration] Gateway logs:\n{docker_compose_logs('litellm-gateway')}")
+        print(
+            f"[MCP Integration] Gateway did not become healthy within {DOCKER_STARTUP_TIMEOUT}s"
+        )
+        print(
+            f"[MCP Integration] Gateway logs:\n{docker_compose_logs('litellm-gateway')}"
+        )
         docker_compose_down()
         yield False
         return
@@ -277,7 +281,9 @@ def docker_stack() -> Generator[bool, None, None]:
 
     if not stub_healthy:
         print("[MCP Integration] MCP stub server did not become healthy within 30s")
-        print(f"[MCP Integration] MCP stub logs:\n{docker_compose_logs('mcp-stub-server')}")
+        print(
+            f"[MCP Integration] MCP stub logs:\n{docker_compose_logs('mcp-stub-server')}"
+        )
         docker_compose_down()
         yield False
         return
@@ -395,7 +401,10 @@ class TestMCPServerRegistration:
         )
 
     def test_registered_server_appears_in_list(
-        self, docker_stack: bool, admin_headers: dict[str, str], auth_headers: dict[str, str]
+        self,
+        docker_stack: bool,
+        admin_headers: dict[str, str],
+        auth_headers: dict[str, str],
     ) -> None:
         """Test that a registered server appears in the servers list."""
         assert docker_stack, "Docker stack not ready"
@@ -470,7 +479,9 @@ class TestMCPToolInvocation:
                 timeout=HTTP_TIMEOUT,
             )
             if resp.status_code != 200:
-                print(f"[MCP Integration] Warning: Server registration returned {resp.status_code}")
+                print(
+                    f"[MCP Integration] Warning: Server registration returned {resp.status_code}"
+                )
         except requests.RequestException as e:
             print(f"[MCP Integration] Warning: Server registration failed: {e}")
 

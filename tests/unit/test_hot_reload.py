@@ -22,7 +22,6 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from litellm_llmrouter.hot_reload import HotReloadManager, get_hot_reload_manager
 

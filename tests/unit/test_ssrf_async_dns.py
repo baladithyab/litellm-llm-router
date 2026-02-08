@@ -171,8 +171,12 @@ class TestAsyncSSRFValidation:
             await is_url_safe_async("https://api.openai.com/v1/chat", resolve_dns=False)
             is True
         )
-        assert await is_url_safe_async("http://127.0.0.1/api", resolve_dns=False) is False
-        assert await is_url_safe_async("http://10.0.0.1/api", resolve_dns=False) is False
+        assert (
+            await is_url_safe_async("http://127.0.0.1/api", resolve_dns=False) is False
+        )
+        assert (
+            await is_url_safe_async("http://10.0.0.1/api", resolve_dns=False) is False
+        )
 
 
 class TestAsyncDNSResolution:
@@ -207,9 +211,7 @@ class TestAsyncDNSResolution:
         from litellm_llmrouter.url_security import validate_outbound_url_async
 
         # Mock async DNS resolution to return a truly public IP (Google DNS)
-        mock_addr_info = [
-            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", 443))
-        ]
+        mock_addr_info = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", 443))]
 
         with patch("asyncio.get_running_loop") as mock_loop:
             mock_loop.return_value.getaddrinfo = AsyncMock(return_value=mock_addr_info)
@@ -285,9 +287,7 @@ class TestRollbackFlag:
         clear_ssrf_config_cache()
 
         # Mock the sync validate_outbound_url to track calls
-        with patch(
-            "litellm_llmrouter.url_security.validate_outbound_url"
-        ) as mock_sync:
+        with patch("litellm_llmrouter.url_security.validate_outbound_url") as mock_sync:
             mock_sync.return_value = "https://api.example.com/v1/chat"
 
             await validate_outbound_url_async(
@@ -455,7 +455,9 @@ class TestNonBlockingBehavior:
                 pass
 
         # Verify the event loop made progress (counter incremented)
-        assert progress_counter > 0, "Event loop should have made progress during DNS resolution"
+        assert progress_counter > 0, (
+            "Event loop should have made progress during DNS resolution"
+        )
         assert result == "https://api.example.com/v1/chat"
 
     @pytest.mark.asyncio
@@ -477,9 +479,15 @@ class TestNonBlockingBehavior:
 
             # Run multiple validations concurrently
             results = await asyncio.gather(
-                validate_outbound_url_async("https://api1.example.com/", resolve_dns=True),
-                validate_outbound_url_async("https://api2.example.com/", resolve_dns=True),
-                validate_outbound_url_async("https://api3.example.com/", resolve_dns=True),
+                validate_outbound_url_async(
+                    "https://api1.example.com/", resolve_dns=True
+                ),
+                validate_outbound_url_async(
+                    "https://api2.example.com/", resolve_dns=True
+                ),
+                validate_outbound_url_async(
+                    "https://api3.example.com/", resolve_dns=True
+                ),
             )
 
         # All should succeed

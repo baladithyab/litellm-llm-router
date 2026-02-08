@@ -16,8 +16,7 @@ Per TG4.1 acceptance criteria in plans/tg4-observability-epic.md:23-32:
 - router.candidates_evaluated: count of evaluated candidates
 """
 
-from unittest.mock import MagicMock, patch
-import pytest
+from unittest.mock import MagicMock
 
 # Import the module under test directly (not through __init__.py)
 import importlib.util
@@ -132,9 +131,7 @@ class TestSetRouterDecisionAttributes:
 
         set_router_decision_attributes(mock_span, candidates_evaluated=5)
 
-        mock_span.set_attribute.assert_called_with(
-            ROUTER_CANDIDATES_EVALUATED_ATTR, 5
-        )
+        mock_span.set_attribute.assert_called_with(ROUTER_CANDIDATES_EVALUATED_ATTR, 5)
 
     def test_sets_outcome_attribute(self):
         """Test that outcome attribute is set when provided."""
@@ -176,9 +173,7 @@ class TestSetRouterDecisionAttributes:
         """Test that error_message attribute is set when provided."""
         mock_span = self._create_mock_span()
 
-        set_router_decision_attributes(
-            mock_span, error_message="Model not found"
-        )
+        set_router_decision_attributes(mock_span, error_message="Model not found")
 
         mock_span.set_attribute.assert_called_with(
             ROUTER_ERROR_MESSAGE_ATTR, "Model not found"
@@ -198,9 +193,7 @@ class TestSetRouterDecisionAttributes:
 
         set_router_decision_attributes(mock_span, fallback_triggered=True)
 
-        mock_span.set_attribute.assert_called_with(
-            ROUTER_FALLBACK_TRIGGERED_ATTR, True
-        )
+        mock_span.set_attribute.assert_called_with(ROUTER_FALLBACK_TRIGGERED_ATTR, True)
 
     def test_does_not_set_none_values(self):
         """Test that None values do not result in set_attribute calls."""
@@ -326,7 +319,9 @@ class TestSetRouterDecisionAttributesErrorPath:
         assert attributes_set[ROUTER_STRATEGY_ATTR] == "knn"
         assert attributes_set[ROUTER_CANDIDATES_EVALUATED_ATTR] == 5
         assert attributes_set[ROUTER_DECISION_OUTCOME_ATTR] == "error"
-        assert attributes_set[ROUTER_DECISION_REASON_ATTR] == "strategy_error: ValueError"
+        assert (
+            attributes_set[ROUTER_DECISION_REASON_ATTR] == "strategy_error: ValueError"
+        )
         assert attributes_set[ROUTER_LATENCY_MS_ATTR] == 15.3
         assert attributes_set[ROUTER_ERROR_TYPE_ATTR] == "ValueError"
         assert attributes_set[ROUTER_ERROR_MESSAGE_ATTR] == "Model file not found"
