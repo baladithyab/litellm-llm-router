@@ -83,13 +83,22 @@ jobs:
           tags: |
             type=ref,event=pr
 
-      # Determine if this is a fork PR (cannot write cache)
-      - name: Check if fork PR
+      # Determine if this PR can write to the registry cache.
+      # Fork PRs and Dependabot PRs have restricted GITHUB_TOKEN permissions
+      # that cannot write packages, so cache export must be disabled.
+      - name: Check cache write eligibility
         id: fork-check
+        env:
+          PR_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          BASE_REPO: ${{ github.repository }}
+          ACTOR: ${{ github.actor }}
         run: |
-          if [[ "${{ github.event.pull_request.head.repo.full_name }}" != "${{ github.repository }}" ]]; then
+          if [[ "$PR_HEAD_REPO" != "$BASE_REPO" ]]; then
             echo "is_fork=true" >> $GITHUB_OUTPUT
             echo "⚠️ Fork PR detected - cache export disabled"
+          elif [[ "$ACTOR" == "dependabot[bot]" || "$ACTOR" == "dependabot-preview[bot]" ]]; then
+            echo "is_fork=true" >> $GITHUB_OUTPUT
+            echo "⚠️ Dependabot PR detected - cache export disabled (restricted token)"
           else
             echo "is_fork=false" >> $GITHUB_OUTPUT
             echo "✅ Same-repo PR - cache export enabled"
